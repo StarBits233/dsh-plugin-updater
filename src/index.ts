@@ -24,11 +24,13 @@ import type { Context } from 'cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 
 import {
-  readRegistryUrl, checkNpmUpdates, mapLimit,
+  readRegistryUrl, checkNpmUpdates, installedVersion as npmInstalledVersion, mapLimit,
 } from './registry.js'
 import {
   gitRemoteHomepage, gitBehindStatus, tryGitUpdate, resolveLinkTarget,
 } from './git.js'
+import { backupNpmState, backupGitState, runGitUpdateWithRollback } from './updater.js'
+import { isNewer } from './semver.js'
 import { Config as UpdaterConfigSchema, type Config as UpdaterConfigType } from './config.js'
 import { PluginStore } from './store.js'
 import type { NpmItem, LinkItem, OutdatedItem, UpdateResult, UpdateResultCached, UpdateResultValue } from './types.js'
@@ -180,7 +182,7 @@ async function scheduledCheck(ctx: Context, config: Config): Promise<void> {
   }
 }
 
-/** 执行更新：npm 走 dsh plugin add；link 走 git（含 dirty 保护）。 */
+/** 执行更新：npm 走 dsh plugin add（带回滚）；link 走 git（带回滚 + dirty 保护）。 */
 async function runUpdate(ctx: Context, config: Config, packages: { name: string; latest: string }[]): Promise<UpdateResultValue> {
   const dir = profileDir(config.profile)
   const deps = readDependencies(config.profile)
@@ -194,17 +196,43 @@ async function runUpdate(ctx: Context, config: Config, packages: { name: string;
         results.push({ ...p, ok: false, output: 'link 目录解析失败，请手动更新' })
         continue
       }
-      const git = await tryGitUpdate(runCmd, target, p, { protectLocal: true })
-      results.push({ ...p, ok: git.ok, output: git.output })
-      store.addHistory({ name: p.name, from: null, to: null, ok: git.ok, kind: 'git', output: git.output })
+      // 3.3: git 更新带备份/回滚
+      const gitBackup = await backupGitState(runCmd, target, p.name)
+      if (!gitBackup) {
+        const plain = await tryGitUpdate(runCmd, target, p, { protectLocal: true })
+        results.push({ ...p, ok: plain.ok, output: plain.output })
+        store.addHistory({ name: p.name, from: null, to: null, ok: plain.ok, kind: 'git', output: plain.output })
+        continue
+      }
+      const upd = await runGitUpdateWithRollback(runCmd, target, gitBackup)
+      results.push({ ...p, ok: upd.ok, output: upd.output + (upd.rolledBack ? '（已回滚）' : '') })
+      store.addHistory({ name: p.name, from: gitBackup.oldCommit.slice(0, 8), to: null, ok: upd.ok, kind: 'git', output: upd.output })
       continue
     }
+    // 3.3: npm 更新带备份/回滚
+    const npmBackup = backupNpmState(dir, p.name, p.latest)
     const r = await runDsh(['plugin', '--profile', config.profile, 'add', `${p.name}@${p.latest}`], dir, 300000)
     const raw = (r.stdout + r.stderr).trim()
     const summary = raw.split(/\r?\n/).filter((l) => !/^\s*Progress:/i.test(l)).slice(-6).join('\n')
     const output = summary || raw.slice(-800)
-    results.push({ ...p, ok: r.code === 0, output })
-    store.addHistory({ name: p.name, from: null, to: p.latest, ok: r.code === 0, kind: 'npm', output })
+    const ok = r.code === 0
+    // 验证 + 失败回滚
+    const actual = npmInstalledVersion(dir, p.name)
+    if (ok && actual !== null && isNewer(p.latest, actual)) {
+      // 版本未到目标 → 回滚
+      if (npmBackup.oldVersion) {
+        await runDsh(['plugin', '--profile', config.profile, 'add', `${p.name}@${npmBackup.oldVersion}`], dir, 300000)
+        results.push({ ...p, ok: false, output: `更新后版本(${actual})未达目标(${p.latest})，已回滚到 ${npmBackup.oldVersion}` })
+      } else {
+        results.push({ ...p, ok: false, output: `更新后版本(${actual})未达目标(${p.latest})且无法回滚` })
+      }
+    } else if (!ok && npmBackup.oldVersion && npmBackup.oldVersion !== p.latest) {
+      await runDsh(['plugin', '--profile', config.profile, 'add', `${p.name}@${npmBackup.oldVersion}`], dir, 300000)
+      results.push({ ...p, ok: false, output: `${output}\n执行失败，已回滚到 ${npmBackup.oldVersion}` })
+    } else {
+      results.push({ ...p, ok, output })
+    }
+    store.addHistory({ name: p.name, from: npmBackup.oldVersion, to: p.latest, ok, kind: 'npm', output })
   }
   return { results }
 }
