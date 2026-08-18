@@ -116,6 +116,12 @@ export class PluginStore {
     this.persist()
   }
 
+  /** 清空所有通知。 */
+  clearNotifications(): void {
+    this.data.notifications = []
+    this.persist()
+  }
+
   /** 记录"已知最新版本"，返回是否发生了新更新（用于触发通知）。 */
   rememberLatest(name: string, latest: string, current?: string | null): boolean {
     const prev = this.data.knownLatest[name]

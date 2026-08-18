@@ -608,38 +608,60 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(() => mountBell(), 'dsh-plugin-updater: notification bell')
 }
 
-/** 站内通知铃铛：右上角徽标 + 弹窗列表。 */
+/** 站内通知铃铛：智能按需浮现 + 清空 + 位置避让 + 点击跳转设置。 */
 function mountBell(): () => void {
   const root = document.getElementById('dshpu-bell-root')
   if (root) return () => {} // 已挂载
 
   const container = document.createElement('div')
   container.id = 'dshpu-bell-root'
-  container.style.cssText = 'position:fixed;right:16px;bottom:16px;z-index:9999;font-family:inherit;'
+  // 底部抬高到 76px 避让右下角任务栏，默认 display: none (无未读时完全隐形)
+  container.style.cssText = 'position:fixed;right:20px;bottom:76px;z-index:9999;font-family:inherit;display:none;transition:opacity .2s;'
 
   const bell = document.createElement('button')
-  bell.style.cssText = 'position:relative;width:38px;height:38px;border-radius:50%;border:1px solid var(--dsw-alias-border-l2, rgba(128,128,128,0.25));background:var(--dsw-alias-bg-layer-2, var(--dsw-alias-bg-module-platform, #111));color:var(--dsw-alias-label-primary, #ddd);cursor:pointer;font-size:16px;box-shadow:0 2px 8px rgba(0,0,0,.25);'
+  bell.style.cssText = 'position:relative;width:40px;height:40px;border-radius:50%;border:1px solid var(--dsw-alias-border-l2, rgba(128,128,128,0.25));background:var(--dsw-alias-bg-layer-2, var(--dsw-alias-bg-module-platform, #111));color:var(--dsw-alias-label-primary, #ddd);cursor:pointer;font-size:17px;box-shadow:0 3px 12px rgba(0,0,0,.28);display:flex;align-items:center;justify-content:center;outline:none;'
   bell.textContent = '🔔'
-  bell.title = '插件更新通知'
+  bell.title = '插件更新通知（点击查看）'
 
   const badge = document.createElement('span')
-  badge.style.cssText = 'position:absolute;top:-4px;right:-4px;min-width:16px;height:16px;border-radius:8px;background:#e74c3c;color:#fff;font-size:10px;line-height:16px;text-align:center;padding:0 4px;display:none;'
+  badge.style.cssText = 'position:absolute;top:-3px;right:-3px;min-width:16px;height:16px;border-radius:8px;background:#e74c3c;color:#fff;font-size:10px;font-weight:bold;line-height:16px;text-align:center;padding:0 4px;display:none;box-shadow:0 0 0 2px var(--dsw-alias-bg-layer-2,#111);'
 
   const panel = document.createElement('div')
-  panel.style.cssText = 'display:none;position:absolute;bottom:46px;right:0;width:300px;max-height:360px;overflow:auto;background:var(--dsw-alias-bg-layer-2, var(--dsw-alias-bg-module-platform, #151515));border:1px solid var(--dsw-alias-border-l2, rgba(128,128,128,0.25));border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.4);color:var(--dsw-alias-label-primary, #ddd);font-size:12px;'
+  panel.style.cssText = 'display:none;position:absolute;bottom:48px;right:0;width:310px;max-height:380px;overflow:hidden;background:var(--dsw-alias-bg-layer-2, var(--dsw-alias-bg-module-platform, #151515));border:1px solid var(--dsw-alias-border-l2, rgba(128,128,128,0.25));border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.35);color:var(--dsw-alias-label-primary, #ddd);font-size:12.5px;flex-direction:column;'
 
   const panelHeader = document.createElement('div')
-  panelHeader.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border-bottom:1px solid var(--dsw-alias-border-l2, rgba(128,128,128,0.2));font-weight:600;color:var(--dsw-alias-label-primary, #ddd);'
-  panelHeader.textContent = '更新通知'
+  panelHeader.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-bottom:1px solid var(--dsw-alias-border-l2, rgba(128,128,128,0.2));font-weight:600;color:var(--dsw-alias-label-primary, #ddd);background:var(--dsw-alias-bg-module-platform, rgba(128,128,128,0.03));'
+
+  const titleSpan = document.createElement('span')
+  titleSpan.textContent = '更新通知'
+
+  const actionsGroup = document.createElement('div')
+  actionsGroup.style.cssText = 'display:flex;gap:6px;align-items:center;'
 
   const readAll = document.createElement('button')
   readAll.style.cssText = 'background:transparent;border:1px solid var(--dsw-alias-border-l2, rgba(128,128,128,0.25));color:var(--dsw-alias-label-secondary, #ccc);border-radius:6px;padding:2px 8px;font-size:11px;cursor:pointer;'
-  readAll.textContent = '全部已读'
+  readAll.textContent = '已读'
+  readAll.title = '标记所有通知为已读'
+
+  const clearAll = document.createElement('button')
+  clearAll.style.cssText = 'background:transparent;border:1px solid var(--dsw-alias-border-l2, rgba(128,128,128,0.25));color:var(--dsw-alias-label-secondary, #ccc);border-radius:6px;padding:2px 8px;font-size:11px;cursor:pointer;'
+  clearAll.textContent = '清空'
+  clearAll.title = '清空所有通知并隐藏'
+
+  const closeBtn = document.createElement('button')
+  closeBtn.style.cssText = 'background:transparent;border:none;color:var(--dsw-alias-label-tertiary, #888);font-size:13px;cursor:pointer;padding:0 2px;line-height:1;'
+  closeBtn.textContent = '✕'
+  closeBtn.title = '关闭弹窗'
+
+  actionsGroup.appendChild(readAll)
+  actionsGroup.appendChild(clearAll)
+  actionsGroup.appendChild(closeBtn)
+  panelHeader.appendChild(titleSpan)
+  panelHeader.appendChild(actionsGroup)
 
   const list = document.createElement('div')
-  list.style.cssText = 'padding:4px 0;'
+  list.style.cssText = 'padding:4px 0;max-height:300px;overflow-y:auto;'
 
-  panelHeader.appendChild(readAll)
   panel.appendChild(panelHeader)
   panel.appendChild(list)
   container.appendChild(bell)
@@ -647,11 +669,36 @@ function mountBell(): () => void {
   container.appendChild(panel)
   document.body.appendChild(container)
 
+  const openSettings = () => {
+    // 尝试打开 DSH 设置并在面板中切换到「插件更新」
+    const navCells = Array.from(document.querySelectorAll<HTMLElement>('button[class*="navCell"], div[class*="navCell"]'))
+    const targetCell = navCells.find((c) => c.textContent?.includes('插件更新'))
+    if (targetCell) {
+      targetCell.click()
+      return
+    }
+    const buttons = Array.from(document.querySelectorAll<HTMLElement>('button'))
+    const settingsBtn = buttons.find((b) =>
+      b.getAttribute('aria-label')?.includes('设置') ||
+      b.title?.includes('设置') ||
+      b.textContent?.includes('设置') ||
+      (b.className.includes('trigger') && b.querySelector('svg')),
+    )
+    if (settingsBtn) {
+      settingsBtn.click()
+      setTimeout(() => {
+        const cells = Array.from(document.querySelectorAll<HTMLElement>('button[class*="navCell"], div[class*="navCell"]'))
+        const cell = cells.find((c) => c.textContent?.includes('插件更新'))
+        if (cell) cell.click()
+      }, 120)
+    }
+  }
+
   const empty = () => {
-    list.textContent = ''
+    list.innerHTML = ''
     const e = document.createElement('div')
-    e.style.cssText = 'padding:14px 10px;color:var(--dsw-alias-label-secondary, #888);text-align:center;'
-    e.textContent = '暂无更新通知'
+    e.style.cssText = 'padding:20px 10px;color:var(--dsw-alias-label-secondary, #888);text-align:center;font-size:12px;'
+    e.textContent = '暂无未处理的更新通知'
     list.appendChild(e)
   }
 
@@ -662,44 +709,106 @@ function mountBell(): () => void {
         const state = d?.value
         if (!state) return
         const unread = state.unread ?? 0
-        badge.style.display = unread > 0 ? 'block' : 'none'
-        badge.textContent = String(unread > 99 ? '99+' : unread)
         const notifs = Array.isArray(state.notifications) ? state.notifications : []
-        if (!notifs.length) { empty(); return }
-        list.textContent = ''
-        if (notifs.length) {
-          for (const n of notifs.slice(0, 20)) {
-            const row = document.createElement('div')
-            row.style.cssText = 'padding:8px 10px;border-bottom:1px solid var(--dsw-alias-border-l2, rgba(128,128,128,0.15));cursor:default;'
-            if (n.read) row.style.opacity = '.55'
-            const t = document.createElement('div')
-            t.style.cssText = 'font-weight:600;color:var(--dsw-alias-label-primary,#ddd);'
-            t.textContent = n.title
-            row.appendChild(t)
-            if (n.body) {
-              const b = document.createElement('div')
-              b.style.cssText = 'color:var(--dsw-alias-label-secondary,#888);font-size:11px;margin-top:2px;'
-              b.textContent = n.body
-              row.appendChild(b)
-            }
-            list.appendChild(row)
+
+        // 核心优化：未读 > 0 时才主动浮现，否则若弹窗未开启则自动隐藏
+        if (unread > 0) {
+          container.style.display = 'block'
+          badge.style.display = 'block'
+          badge.textContent = String(unread > 99 ? '99+' : unread)
+        } else {
+          badge.style.display = 'none'
+          if (panel.style.display !== 'flex') {
+            container.style.display = 'none'
           }
+        }
+
+        if (!notifs.length) {
+          empty()
+          return
+        }
+
+        list.innerHTML = ''
+        for (const n of notifs.slice(0, 20)) {
+          const row = document.createElement('div')
+          row.style.cssText = `padding:9px 12px;border-bottom:1px solid var(--dsw-alias-border-l2, rgba(128,128,128,0.12));cursor:pointer;display:flex;align-items:center;justify-content:space-between;transition:background .15s;${n.read ? 'opacity: 0.6;' : ''}`
+          row.onmouseenter = () => { row.style.background = 'var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,0.08))' }
+          row.onmouseleave = () => { row.style.background = 'transparent' }
+
+          const content = document.createElement('div')
+          content.style.cssText = 'flex: 1; min-width: 0;'
+
+          const t = document.createElement('div')
+          t.style.cssText = 'font-weight:600;color:var(--dsw-alias-label-primary,#ddd);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;'
+          t.textContent = n.title
+          content.appendChild(t)
+
+          if (n.body) {
+            const b = document.createElement('div')
+            b.style.cssText = 'color:var(--dsw-alias-label-secondary,#888);font-size:11.5px;margin-top:2px;'
+            b.textContent = n.body
+            content.appendChild(b)
+          }
+
+          const arrow = document.createElement('span')
+          arrow.style.cssText = 'color:var(--dsw-alias-state-business-primary,#2563eb);font-size:12px;margin-left:8px;white-space:nowrap;'
+          arrow.textContent = '去更新 ›'
+
+          row.appendChild(content)
+          row.appendChild(arrow)
+
+          // 点击通知行直接打开设置页
+          row.addEventListener('click', () => {
+            panel.style.display = 'none'
+            if (badge.style.display === 'none') container.style.display = 'none'
+            openSettings()
+          })
+
+          list.appendChild(row)
         }
       })
       .catch(() => { /* 静默：宿主未就绪 */ })
   }
 
-  readAll.addEventListener('click', () => {
+  readAll.addEventListener('click', (e) => {
+    e.stopPropagation()
     fetch('/@dsh-external/dsh-plugin-updater/api/notifications/read', { method: 'POST', headers: { 'content-type': 'application/json' } })
       .then(() => refresh())
       .catch(() => {})
   })
 
-  bell.addEventListener('click', () => {
-    const open = panel.style.display === 'block'
-    panel.style.display = open ? 'none' : 'block'
-    // 点开时即使刷新一次
+  clearAll.addEventListener('click', (e) => {
+    e.stopPropagation()
+    fetch('/@dsh-external/dsh-plugin-updater/api/notifications/clear', { method: 'POST', headers: { 'content-type': 'application/json' } })
+      .then(() => {
+        panel.style.display = 'none'
+        container.style.display = 'none'
+        refresh()
+      })
+      .catch(() => {})
+  })
+
+  closeBtn.addEventListener('click', (e) => {
+    e.stopPropagation()
+    panel.style.display = 'none'
+    if (badge.style.display === 'none') container.style.display = 'none'
+  })
+
+  bell.addEventListener('click', (e) => {
+    e.stopPropagation()
+    const open = panel.style.display === 'flex'
+    panel.style.display = open ? 'none' : 'flex'
     if (!open) refresh()
+  })
+
+  // 点击面板外部自动关闭
+  document.addEventListener('click', (e) => {
+    if (!container.contains(e.target as Node)) {
+      if (panel.style.display === 'flex') {
+        panel.style.display = 'none'
+        if (badge.style.display === 'none') container.style.display = 'none'
+      }
+    }
   })
 
   refresh()

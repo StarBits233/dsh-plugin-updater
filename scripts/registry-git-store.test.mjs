@@ -79,6 +79,11 @@ test('store: 持久化全流程（临时 home）', () => {
   s2.markAllRead()
   const s3 = new storeMod.PluginStore(home)
   assert.equal(s3.unreadCount(), 0)
+  assert.equal(s3.snapshot().notifications.length, 1)
+  s3.clearNotifications()
+  assert.equal(s3.snapshot().notifications.length, 0)
+  const s4 = new storeMod.PluginStore(home)
+  assert.equal(s4.snapshot().notifications.length, 0)
   rmSync(home, { recursive: true, force: true })
 })
 

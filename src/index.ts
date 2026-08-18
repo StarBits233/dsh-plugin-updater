@@ -430,6 +430,12 @@ export function apply(ctx: Context, config: Config): void {
         writeJson(res, 200, { ok: true })
         return
       }
+      // POST /notifications/clear
+      if (req.method === 'POST' && pathname === '/notifications/clear') {
+        store.clearNotifications()
+        writeJson(res, 200, { ok: true })
+        return
+      }
       // POST /ignore（3.9）
       if (req.method === 'POST' && pathname === '/ignore') {
         let body: any = {}
