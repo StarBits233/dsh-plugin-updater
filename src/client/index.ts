@@ -129,23 +129,79 @@ interface UpdaterState {
   cached?: boolean
 }
 
-function PluginUpdaterSection(_props: { close?: () => void }): any {
-  const [locale, setLocale] = useState<Locale>(() => {
-    try {
-      const saved = localStorage.getItem('dshpu_locale') as Locale
-      if (saved === 'zh' || saved === 'en') return saved
-      return typeof navigator !== 'undefined' && navigator.language?.startsWith('zh') ? 'zh' : 'en'
-    } catch {
-      return 'zh'
-    }
-  })
+function getDshLocale(ctxLocale?: any): Locale {
+  // 1. 优先从 DSH 官方 locale service 读取
+  try {
+    const active = ctxLocale?.getLocale?.()?.active
+    if (active === 'zh' || active === 'en') return active
+  } catch { /* empty */ }
 
-  const changeLocale = (newLoc: Locale) => {
-    setLocale(newLoc)
-    try { localStorage.setItem('dshpu_locale', newLoc) } catch { /* empty */ }
+  // 2. 从 DOM 环境探测 DSH 当前界面语言
+  if (typeof document !== 'undefined') {
+    const htmlLang = (document.documentElement.getAttribute('lang') || '').toLowerCase()
+    if (htmlLang.startsWith('zh')) return 'zh'
+    if (htmlLang.startsWith('en')) return 'en'
+
+    // 检查侧边栏或主界面是否有英文系统词汇（如 General / Settings / Models）
+    const bodyText = document.body?.innerText || ''
+    if (bodyText.includes('General') || bodyText.includes('Settings') || bodyText.includes('Plugins') || bodyText.includes('Models')) {
+      if (!bodyText.includes('通用设置') && !bodyText.includes('模型')) {
+        return 'en'
+      }
+    }
   }
 
-  const t = translations[locale] || translations.zh
+  // 3. 回退到浏览器 navigator
+  if (typeof navigator !== 'undefined') {
+    return navigator.language?.toLowerCase().startsWith('zh') ? 'zh' : 'en'
+  }
+
+  return 'en'
+}
+
+function PluginUpdaterSection(props: { close?: () => void; ctx?: any }): any {
+  const [locale, setLocale] = useState<Locale>(() => getDshLocale(props.ctx?.locale ?? (props.ctx as any)?.get?.('locale')))
+
+  useEffect(() => {
+    const ctxLocale = props.ctx?.locale ?? (props.ctx as any)?.get?.('locale')
+    let unsubLocale: (() => void) | undefined
+    if (ctxLocale?.subscribe) {
+      unsubLocale = ctxLocale.subscribe(() => {
+        setLocale(getDshLocale(ctxLocale))
+      })
+    }
+
+    let unsubCtx: (() => void) | undefined
+    if (props.ctx?.on) {
+      unsubCtx = props.ctx.on('locale/change', (snap: any) => {
+        if (snap?.active === 'zh' || snap?.active === 'en') {
+          setLocale(snap.active)
+        }
+      })
+    }
+
+    // 轮询检查 DOM 语言变化（无缝同步无需刷新的通用设置切换）
+    const timer = setInterval(() => {
+      const detected = getDshLocale(ctxLocale)
+      setLocale((prev) => (prev !== detected ? detected : prev))
+    }, 800)
+
+    return () => {
+      if (unsubLocale) unsubLocale()
+      if (unsubCtx) unsubCtx()
+      clearInterval(timer)
+    }
+  }, [props.ctx])
+
+  const changeLocale = (newLoc: Locale) => {
+    const ctxLocale = props.ctx?.locale ?? (props.ctx as any)?.get?.('locale')
+    if (ctxLocale?.setLocale) {
+      try { ctxLocale.setLocale(newLoc) } catch { /* empty */ }
+    }
+    setLocale(newLoc)
+  }
+
+  const t = translations[locale] || translations.en
 
   const [state, setState] = useState<UpdaterState>({ npm: [], linked: [], errors: [] })
   const [msg, setMsg] = useState('')
@@ -1090,18 +1146,20 @@ export function apply(ctx: ClientContext): void {
       name: 'settings.section',
       id: 'dsh-plugin-updater-section',
       order: 60,
-      label: () => '插件更新',
-    }, PluginUpdaterSection),
+      label: () => (getDshLocale((ctx as any).locale ?? (ctx as any).get?.('locale')) === 'zh' ? '插件更新' : 'Plugin Updates'),
+    }, (props: any) => jsx(PluginUpdaterSection, { ...props, ctx })),
   ), 'dsh-plugin-updater: settings section')
 
   // 3.2：站内通知铃铛（纯 DOM 独立挂载，参考 whale-girl 模式）
-  ctx.effect(() => mountBell(), 'dsh-plugin-updater: notification bell')
+  ctx.effect(() => mountBell(ctx), 'dsh-plugin-updater: notification bell')
 }
 
 /** 站内通知铃铛：智能按需浮现 + 清空 + 位置避让 + 点击跳转设置。 */
-function mountBell(): () => void {
+function mountBell(ctx?: any): () => void {
   const root = document.getElementById('dshpu-bell-root')
   if (root) return () => {} // 已挂载
+
+  const getT = () => translations[getDshLocale(ctx?.locale ?? ctx?.get?.('locale'))] || translations.en
 
   const container = document.createElement('div')
   container.id = 'dshpu-bell-root'
@@ -1111,7 +1169,7 @@ function mountBell(): () => void {
   const bell = document.createElement('button')
   bell.style.cssText = 'position:relative;width:40px;height:40px;border-radius:50%;border:1px solid var(--dsw-alias-border-l2, rgba(128,128,128,0.25));background:var(--dsw-alias-bg-layer-2, var(--dsw-alias-bg-module-platform, #111));color:var(--dsw-alias-label-primary, #ddd);cursor:pointer;font-size:17px;box-shadow:0 3px 12px rgba(0,0,0,.28);display:flex;align-items:center;justify-content:center;outline:none;'
   bell.textContent = '🔔'
-  bell.title = '插件更新通知（点击查看）'
+  bell.title = getT().notifTitle
 
   const badge = document.createElement('span')
   badge.style.cssText = 'position:absolute;top:-3px;right:-3px;min-width:16px;height:16px;border-radius:8px;background:#e74c3c;color:#fff;font-size:10px;font-weight:bold;line-height:16px;text-align:center;padding:0 4px;display:none;box-shadow:0 0 0 2px var(--dsw-alias-bg-layer-2,#111);'
@@ -1123,25 +1181,25 @@ function mountBell(): () => void {
   panelHeader.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-bottom:1px solid var(--dsw-alias-border-l2, rgba(128,128,128,0.2));font-weight:600;color:var(--dsw-alias-label-primary, #ddd);background:var(--dsw-alias-bg-module-platform, rgba(128,128,128,0.03));'
 
   const titleSpan = document.createElement('span')
-  titleSpan.textContent = '更新通知'
+  titleSpan.textContent = getT().notifTitle
 
   const actionsGroup = document.createElement('div')
   actionsGroup.style.cssText = 'display:flex;gap:6px;align-items:center;'
 
   const readAll = document.createElement('button')
   readAll.style.cssText = 'background:transparent;border:1px solid var(--dsw-alias-border-l2, rgba(128,128,128,0.25));color:var(--dsw-alias-label-secondary, #ccc);border-radius:6px;padding:2px 8px;font-size:11px;cursor:pointer;'
-  readAll.textContent = '已读'
-  readAll.title = '标记所有通知为已读'
+  readAll.textContent = getT().notifMarkAllRead
+  readAll.title = getT().notifMarkAllRead
 
   const clearAll = document.createElement('button')
   clearAll.style.cssText = 'background:transparent;border:1px solid var(--dsw-alias-border-l2, rgba(128,128,128,0.25));color:var(--dsw-alias-label-secondary, #ccc);border-radius:6px;padding:2px 8px;font-size:11px;cursor:pointer;'
-  clearAll.textContent = '清空'
-  clearAll.title = '清空所有通知并隐藏'
+  clearAll.textContent = getT().notifClearAll
+  clearAll.title = getT().notifClearAll
 
   const closeBtn = document.createElement('button')
   closeBtn.style.cssText = 'background:transparent;border:none;color:var(--dsw-alias-label-tertiary, #888);font-size:13px;cursor:pointer;padding:0 2px;line-height:1;'
   closeBtn.textContent = '✕'
-  closeBtn.title = '关闭弹窗'
+  closeBtn.title = '✕'
 
   actionsGroup.appendChild(readAll)
   actionsGroup.appendChild(clearAll)
@@ -1160,9 +1218,9 @@ function mountBell(): () => void {
   document.body.appendChild(container)
 
   const openSettings = () => {
-    // 尝试打开 DSH 设置并在面板中切换到「插件更新」
+    // 尝试打开 DSH 设置并在面板中切换到「插件更新 / Plugin Updates」
     const navCells = Array.from(document.querySelectorAll<HTMLElement>('button[class*="navCell"], div[class*="navCell"]'))
-    const targetCell = navCells.find((c) => c.textContent?.includes('插件更新'))
+    const targetCell = navCells.find((c) => c.textContent?.includes('插件更新') || c.textContent?.includes('Plugin Updates'))
     if (targetCell) {
       targetCell.click()
       return
@@ -1170,15 +1228,18 @@ function mountBell(): () => void {
     const buttons = Array.from(document.querySelectorAll<HTMLElement>('button'))
     const settingsBtn = buttons.find((b) =>
       b.getAttribute('aria-label')?.includes('设置') ||
+      b.getAttribute('aria-label')?.includes('Settings') ||
       b.title?.includes('设置') ||
+      b.title?.includes('Settings') ||
       b.textContent?.includes('设置') ||
+      b.textContent?.includes('Settings') ||
       (b.className.includes('trigger') && b.querySelector('svg')),
     )
     if (settingsBtn) {
       settingsBtn.click()
       setTimeout(() => {
         const cells = Array.from(document.querySelectorAll<HTMLElement>('button[class*="navCell"], div[class*="navCell"]'))
-        const cell = cells.find((c) => c.textContent?.includes('插件更新'))
+        const cell = cells.find((c) => c.textContent?.includes('插件更新') || c.textContent?.includes('Plugin Updates'))
         if (cell) cell.click()
       }, 120)
     }
@@ -1188,7 +1249,7 @@ function mountBell(): () => void {
     list.innerHTML = ''
     const e = document.createElement('div')
     e.style.cssText = 'padding:20px 10px;color:var(--dsw-alias-label-secondary, #888);text-align:center;font-size:12px;'
-    e.textContent = '暂无未处理的更新通知'
+    e.textContent = getT().notifEmpty
     list.appendChild(e)
   }
 
