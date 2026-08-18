@@ -12,6 +12,10 @@
 
 [功能特性](#-核心特性) • [快速安装](#-快速安装) • [使用指南](#-使用指南) • [架构设计](#-底层架构与安全护栏) • [配置说明](#-配置说明) • [贡献与构建](#-开发与构建)
 
+<br/>
+
+<img src="docs/preview.png" alt="DSH Plugin Updater 预览界面" width="680" style="border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.15);" />
+
 </div>
 
 ---
