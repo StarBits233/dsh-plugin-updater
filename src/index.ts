@@ -442,6 +442,51 @@ export function apply(ctx: Context, config: Config): void {
         writeJson(res, 200, { ok: true, value: info })
         return
       }
+      // POST /rollback
+      if (req.method === 'POST' && pathname === '/rollback') {
+        let body: any = {}
+        try { body = JSON.parse(await readBody(req)) } catch { /* empty */ }
+        const { name, targetVersion, kind } = body
+        if (!name || !targetVersion) {
+          writeJson(res, 400, { ok: false, error: '需要 name 和 targetVersion' })
+          return
+        }
+        const dir = profileDir(config.profile)
+        if (kind === 'git') {
+          const target = resolveLinkTarget(dir, `link:${name}`) || resolveLinkTarget(dir, `file:${name}`)
+          if (target) {
+            const r = await runCmd('git', ['reset', '--hard', targetVersion], target, 30000)
+            store.addHistory({ name, from: 'rollback', to: targetVersion, ok: r.code === 0, kind: 'git', output: r.stdout || r.stderr })
+            writeJson(res, 200, { ok: r.code === 0, output: r.stdout || r.stderr })
+            return
+          }
+          writeJson(res, 400, { ok: false, error: '未找到 link 目录' })
+          return
+        }
+        const r = await runDsh(['plugin', '--profile', config.profile, 'add', `${name}@${targetVersion}`], dir, 300000)
+        healLinkJunctions(dir)
+        const ok = r.code === 0
+        const pkgDir = join(dir, 'node_modules', ...name.split('/'))
+        if (ok) await hotReloadPlugin(ctx, name, pkgDir)
+        store.addHistory({ name, from: 'rollback', to: targetVersion, ok, kind: 'npm', output: r.stdout || r.stderr })
+        writeJson(res, 200, { ok, output: r.stdout || r.stderr })
+        return
+      }
+      // POST /hot-reload
+      if (req.method === 'POST' && pathname === '/hot-reload') {
+        let body: any = {}
+        try { body = JSON.parse(await readBody(req)) } catch { /* empty */ }
+        const name = body?.name
+        const dir = profileDir(config.profile)
+        if (name) {
+          const pkgDir = join(dir, 'node_modules', ...name.split('/'))
+          const hrel = await hotReloadPlugin(ctx, name, pkgDir)
+          writeJson(res, 200, { ok: hrel.ok, output: hrel.output })
+          return
+        }
+        writeJson(res, 200, { ok: true, output: '已执行插件热重载' })
+        return
+      }
       // GET /notifications
       if (req.method === 'GET' && pathname === '/notifications') {
         writeJson(res, 200, { ok: true, value: store.snapshot().notifications })

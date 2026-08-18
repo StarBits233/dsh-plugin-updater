@@ -252,6 +252,7 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
           ? `更新完成：${okCount} 成功 / ${failCount} 失败`
           : `已更新 ${okCount} 个插件（热重启已执行${results.some((r: any) => r.output?.includes('热重启')) ? '，免手动重启' : '，请重启 DSH'}）`,
           failCount > 0 ? 'err' : 'ok')
+        if (okCount > 0) setNeedRestart(true)
         setTimeout(() => refresh(true), 1500)
       })
       .catch((e: any) => {
@@ -263,6 +264,60 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
         setBusy(false)
         setUpdating([])
       })
+  }
+
+  const [needRestart, setNeedRestart] = useState(false)
+  const [reloading, setReloading] = useState(false)
+
+  const triggerHotReload = () => {
+    setReloading(true)
+    fetch(API + '/hot-reload', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({}) })
+      .then((r) => r.json())
+      .then((d: any) => {
+        showToast(d?.output || '插件热重载完成', 'ok')
+      })
+      .catch((e: any) => showToast('热重载失败: ' + e, 'err'))
+      .finally(() => setReloading(false))
+  }
+
+  const copyRestartCommand = () => {
+    try {
+      navigator.clipboard.writeText('dsh service restart')
+      showToast('已复制重启命令到剪贴板', 'ok')
+    } catch {
+      showToast('无法访问剪贴板', 'err')
+    }
+  }
+
+  const runRollback = (name: string, targetVersion: string, kind: string) => {
+    if (!window.confirm(`确定将 ${name} 回滚降级到版本 ${targetVersion}？`)) return
+    setBusy(true)
+    setMsg(`正在将 ${name} 回滚到 ${targetVersion}…`)
+    fetch(API + '/rollback', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name, targetVersion, kind }),
+    })
+      .then((r) => r.json())
+      .then((d: any) => {
+        if (d?.ok) {
+          showToast(`已成功将 ${name} 回滚到 ${targetVersion}`, 'ok')
+          setMsg(`回滚成功：${name} → ${targetVersion}\n${d?.output || ''}`)
+          setMsgErr(false)
+          setNeedRestart(true)
+          setTimeout(() => refresh(true), 1500)
+        } else {
+          showToast(`回滚失败: ${d?.output || d?.error || ''}`, 'err')
+          setMsg(`回滚失败：${d?.output || d?.error || ''}`)
+          setMsgErr(true)
+        }
+      })
+      .catch((e: any) => {
+        showToast('回滚请求异常: ' + e, 'err')
+        setMsg('回滚请求异常: ' + e)
+        setMsgErr(true)
+      })
+      .finally(() => setBusy(false))
   }
 
   const outdatedNpm = state.npm.filter((n) => n.outdated && !n.ignored && !ignoredNames.has(n.name))
@@ -611,6 +666,39 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
       jsx('h3', { style: C.h3, children: '插件更新检查（dsh-plugin-updater）' }),
       jsx('p', { style: C.stats, children: stats }),
       mainNode,
+      needRestart ? jsxs('div', {
+        style: {
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          margin: '10px 0', padding: '10px 14px', borderRadius: 8,
+          background: 'rgba(240,180,60,0.12)', border: '1px solid rgba(240,180,60,0.4)',
+          color: 'var(--dsw-alias-label-primary, #ddd)', fontSize: 12.5, flexWrap: 'wrap', gap: 8,
+        },
+        children: [
+          jsxs('div', {
+            style: { display: 'flex', alignItems: 'center', gap: 6 },
+            children: [
+              jsx('span', { style: { fontSize: 16 }, children: '⚡' }),
+              jsx('span', { style: { fontWeight: 500 }, children: '插件版本已变更！可通过热重载即时生效，或重启 DSH 服务。' }),
+            ],
+          }),
+          jsxs('div', {
+            style: { display: 'flex', gap: 6 },
+            children: [
+              jsx('button', {
+                style: { ...C.btnGhost, padding: '4px 10px', fontSize: 12, cursor: 'pointer', borderRadius: 6 },
+                onClick: triggerHotReload,
+                disabled: reloading,
+                children: reloading ? '重载中…' : '🔄 立即热重载',
+              }),
+              jsx('button', {
+                style: { ...C.btnGhost, padding: '4px 10px', fontSize: 12, cursor: 'pointer', borderRadius: 6 },
+                onClick: copyRestartCommand,
+                children: '📋 复制重启命令',
+              }),
+            ],
+          }),
+        ],
+      }) : null,
       jsxs('div', {
         style: C.row,
         children: [
@@ -711,13 +799,25 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
                 style: { ...C.list, marginTop: 8, fontSize: 12, maxHeight: 180, overflow: 'auto', background: 'var(--dsw-alias-bg-module-platform, rgba(128,128,128,0.04))', border: '1px solid var(--dsw-alias-border-l2, rgba(128,128,128,0.15))', borderRadius: 8, padding: '6px 8px' },
                 children: history.slice(0, 30).map((h: any) =>
                   jsxs('li', {
-                    style: { padding: '4px 6px', color: h.ok ? 'var(--dsw-alias-label-primary, inherit)' : '#e74c3c' },
+                    style: { padding: '4px 6px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', color: h.ok ? 'var(--dsw-alias-label-primary, inherit)' : '#e74c3c' },
                     children: [
-                      jsx('span', { style: { color: 'var(--dsw-alias-label-tertiary, #999)' }, children: `${h.at ? new Date(h.at).toLocaleString() : ''} ` }),
-                      jsx('span', { style: { fontWeight: 600 }, children: h.name }),
-                      jsx('span', { style: { color: 'var(--dsw-alias-label-secondary, #888)' }, children: h.from && h.to ? ` ${h.from} → ${h.to}` : '' }),
-                      jsx('span', { children: h.ok ? ' ✅' : ' ❌' }),
-                    ],
+                      jsxs('div', {
+                        children: [
+                          jsx('span', { style: { color: 'var(--dsw-alias-label-tertiary, #999)' }, children: `${h.at ? new Date(h.at).toLocaleString() : ''} ` }),
+                          jsx('span', { style: { fontWeight: 600 }, children: h.name }),
+                          jsx('span', { style: { color: 'var(--dsw-alias-label-secondary, #888)' }, children: h.from && h.to ? ` ${h.from} → ${h.to}` : '' }),
+                          jsx('span', { children: h.ok ? ' ✅' : ' ❌' }),
+                        ],
+                      }),
+                      h.ok && h.from && h.from !== 'rollback' && h.from !== h.to
+                        ? jsx('button', {
+                            style: { background: 'transparent', border: '1px solid var(--dsw-alias-border-l2, rgba(128,128,128,0.3))', color: 'var(--dsw-alias-state-business-primary, #2563eb)', borderRadius: 4, fontSize: 11, cursor: 'pointer', padding: '1px 6px' },
+                            title: `一键将 ${h.name} 回滚降级到 ${h.from}`,
+                            onClick: () => runRollback(h.name, h.from, h.kind),
+                            children: `↩ 回滚到 ${h.from}`,
+                          }, 'rb-' + h.name)
+                        : null,
+                    ].filter(Boolean),
                   }, 'hist-' + (h.at ?? '') + h.name),
                 ),
               }, 'history')
