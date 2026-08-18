@@ -1,28 +1,20 @@
-# @dsh-external/dsh-plugin-updater
+# @dsh-external/dsh-plugin-updater (v0.1.0)
 
-DSH 插件更新检查与一键更新插件（含 link 本地插件、GitHub releases 下载、失败回滚、热重启、自动检查与站内通知）。
+DeepSeek Harness (DSH) 插件更新检查与一键更新套件（支持 NPM 插件、本地 Link 插件、GitHub Release 下载、一键版本回滚、热重载、更新日志预览、环境体检自愈与智能站内通知）。
 
-> 源仓库：`XinXie-WRJ/dsh-plugin-updater`（Private）｜本地：`D:\MyProject\Tools\DSHTools\dsh-plugin-updater`
-> 功能规划与演进记录见 `2-AIAgent使用笔记/6-DSH使用笔记/DSH插件开发日志/DSH 插件更新插件（dsh-plugin-updater）/架构与功能优化方案.md`
+> 仓库：`https://github.com/XinXie-WRJ/dsh-plugin-updater`
 
-## 功能总览
+## ✨ 核心特性
 
-| 模块 | 能力 | 版本 |
-|---|---|---|
-| npm 插件检测 | 读 profile `dependencies` → 并发查 registry `/latest` + 本地 `node_modules` 版本 semver 比对（10 分钟缓存，`?force=1` 强制刷新） | 3.1 |
-| 完整 semver | `v` 前缀 / `-beta`/`-rc` 预发布排序 / build metadata / 降级保护（`latest < installed` 不算更新） | 3.1 |
-| link 插件检测 | 解析 `link:`/`file:` 目标 → 本地 git 落后检测（`git fetch` + `HEAD..origin/<branch>`）→ 或 GitHub releases | 3.1/3.5 |
-| 自动定时检查 | `timer` 服务，默认 6h（可配 1h/6h/12h/24h/7d），发现新版本写持久化通知 | 3.2 |
-| 站内通知 | 右上/右下角铃铛徽标（未读数）+ 弹窗列表 + 全部已读 | 3.2 |
-| 失败自动回滚 | npm：记录旧版本，`dsh plugin add name@旧版本` 回滚；git：记录 HEAD commit，`git reset --hard` 回滚；GitHub 下载：备份旧目录恢复 | 3.3 |
-| 热重启 | 更新成功后重建 Cordis fiber（purge loadCache → 重新 import → registry.plugin 重建），免手动重启 | 3.4 |
-| GitHub releases 更新 | 无本地 git 但有 `repository` 字段 → 查 GitHub 最新 releases/tags（API 限流自动降级 `git ls-remote`）→ codeload 下载 tarball → 校验 → 覆盖替换 | 3.5 |
-| 主程序更新 | 检测 `@deepseek-ai/dsh` 版本 vs npm latest；一键更新（`allowCoreUpdates` 开关，默认关闭，且不自动重启宿主） | 3.6 |
-| git 安全护栏 | `git reset --hard` 前检测 dirty → 自动 stash（可选关闭）；per-package 并发更新锁 | 3.7 |
-| UI 卡片网格 | 图标 + 名称 + 状态徽标（黄可更/绿最新/红失败）+ 当前→最新版本行 + 来源标签 + 更新按钮 + 顶部横幅 + toast | 3.8 |
-| 忽略/历史 | 标记「忽略更新」（持久化，列表与通知都跳过）+ 更新历史（时间/插件/版本/成败） | 3.9 |
-| 单测 | `node --test`（registry / git / store / semver / updater / github，21 断言） | 3.10 |
-| 构建可移植 | `build.ps1`（Windows 原生）+ `scripts/build.sh`（bash）；Config 全参数化（间隔/通知/GitHub/超时） | 3.11 |
+- 🔍 **双轨更新检测**：同时支持 NPM 官方/镜像源与本地 Link 插件（Git 远程对比 + GitHub Release）的双轨并发检测与 SemVer 比对；
+- 📝 **更新日志预览**：在卡片中直接预览新版本的 GitHub Release Notes / Changelog，更新前清晰掌握变更内容；
+- 🛡️ **一键版本回滚**：更新历史中支持一键版本降级与安全恢复；
+- ⚡ **智能热重载**：更新成功后自动重建 Cordis Fiber，支持一键热重载与便捷重启命令复制；
+- ⚙️ **可视化配置面板**：无需编辑配置文件，在界面直接调整定时检查周期、通知开关与 GitHub Token；
+- 📋 **多选批量更新 & 状态筛选**：支持即时搜索、状态分类标签（全部/可更新/NPM/Link/已忽略）与多选批量更新；
+- 🩺 **环境健康体检**：一键检测 Profile 依赖完整性与 Windows Junction 软链异常并自动执行自愈修复；
+- 🔔 **零打扰智能通知**：右下角悬浮铃铛在 0 未读时自动完全隐身，仅在发现新版本时智能滑出，并已做底部任务栏位置避让；
+- 🎨 **主题无缝自适应**：全面对接 DSH 原生 Design Tokens，完美适配浅色（Light）与深色（Dark）外观。
 
 ## 构建 / 测试
 
