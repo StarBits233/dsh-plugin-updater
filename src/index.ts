@@ -250,78 +250,90 @@ async function runMainUpdate(ctx: Context, config: Config): Promise<{ ok: boolea
   return { ok: false, output: output.slice(-500) || '主程序更新失败' }
 }
 
-/** 执行更新：npm 走 dsh plugin add（带回滚）；link 走 git（带回滚 + dirty 保护）。 */
+/** 执行更新：npm 走 dsh plugin add（带回滚）；link 走 git（带回滚 + dirty 保护）。带 per-package 并发锁（3.7）。 */
+const RUNNING_UPDATES = new Set<string>()
+
 async function runUpdate(ctx: Context, config: Config, packages: { name: string; latest: string }[]): Promise<UpdateResultValue> {
   const dir = profileDir(config.profile)
   const deps = readDependencies(config.profile)
   const results: { name: string; latest: string; ok: boolean; output: string }[] = []
   const store = st(ctx)
   for (const p of packages) {
-    const spec = deps[p.name] ?? ''
-    if (isLinked(spec)) {
-      const target = resolveLinkTarget(dir, spec)
-      if (!target) {
-        results.push({ ...p, ok: false, output: 'link 目录解析失败，请手动更新' })
-        continue
-      }
-      // 3.3: git 更新带备份/回滚
-      const gitBackup = await backupGitState(runCmd, target, p.name)
-      if (gitBackup) {
-        const upd = await runGitUpdateWithRollback(runCmd, target, gitBackup)
-        results.push({ ...p, ok: upd.ok, output: upd.output + (upd.rolledBack ? '（已回滚）' : '') })
-        store.addHistory({ name: p.name, from: gitBackup.oldCommit.slice(0, 8), to: null, ok: upd.ok, kind: 'git', output: upd.output })
-        continue
-      }
-      // 3.5: 无本地 git 但有 GitHub 仓库 → 下载更新
-      const ghRepo = readGhRepo(target)
-      if (ghRepo) {
-        const gh = await githubLatest(ghRepo, null, 8000, config.githubToken || process.env.GITHUB_TOKEN || '')
-        if (gh) {
-          const dl = await runGithubDownloadUpdate(runCmd, target, { repo: ghRepo, version: gh.version, tarball: gh.tarball, tag: gh.tag }, p.name)
-          results.push({ ...p, ok: dl.ok, output: dl.output })
-          store.addHistory({ name: p.name, from: null, to: gh.version, ok: dl.ok, kind: 'git', output: dl.output })
-          continue
-        }
-      }
-      const plain = await tryGitUpdate(runCmd, target, p, { protectLocal: true })
-      results.push({ ...p, ok: plain.ok, output: plain.output })
-      store.addHistory({ name: p.name, from: null, to: null, ok: plain.ok, kind: 'git', output: plain.output })
+    // 3.7: 并发锁：同包已在更新中 → 跳过并提示
+    if (RUNNING_UPDATES.has(p.name)) {
+      results.push({ ...p, ok: false, output: '该插件正在更新中（并发锁），请稍后再试' })
       continue
     }
-    // 3.3: npm 更新带备份/回滚
-    const npmBackup = backupNpmState(dir, p.name, p.latest)
-    const r = await runDsh(['plugin', '--profile', config.profile, 'add', `${p.name}@${p.latest}`], dir, 300000)
-    const raw = (r.stdout + r.stderr).trim()
-    const summary = raw.split(/\r?\n/).filter((l) => !/^\s*Progress:/i.test(l)).slice(-6).join('\n')
-    const output = summary || raw.slice(-800)
-    const ok = r.code === 0
-    // 验证 + 失败回滚
-    const actual = npmInstalledVersion(dir, p.name)
-    if (ok && actual !== null && isNewer(p.latest, actual)) {
-      // 版本未到目标 → 回滚
-      if (npmBackup.oldVersion) {
-        await runDsh(['plugin', '--profile', config.profile, 'add', `${p.name}@${npmBackup.oldVersion}`], dir, 300000)
-        results.push({ ...p, ok: false, output: `更新后版本(${actual})未达目标(${p.latest})，已回滚到 ${npmBackup.oldVersion}` })
-      } else {
-        results.push({ ...p, ok: false, output: `更新后版本(${actual})未达目标(${p.latest})且无法回滚` })
-      }
-    } else if (!ok && npmBackup.oldVersion && npmBackup.oldVersion !== p.latest) {
-      await runDsh(['plugin', '--profile', config.profile, 'add', `${p.name}@${npmBackup.oldVersion}`], dir, 300000)
-      results.push({ ...p, ok: false, output: `${output}\n执行失败，已回滚到 ${npmBackup.oldVersion}` })
-    } else {
-      results.push({ ...p, ok, output })
-      // 3.4: 热重启（更新成功后重建 fiber，免手动重启）
-      if (ok) {
-        const pkgDir = join(dir, 'node_modules', ...p.name.split('/'))
-        const hrel = await hotReloadPlugin(ctx, p.name, pkgDir)
-        results[results.length - 1].output = summary
-          ? `${summary}\n${hrel.output}`
-          : hrel.output
-      }
+    RUNNING_UPDATES.add(p.name)
+    try {
+      const res = await updateOne(ctx, config, dir, deps, store, p)
+      results.push({ ...p, ...res })
+    } finally {
+      RUNNING_UPDATES.delete(p.name)
     }
-    store.addHistory({ name: p.name, from: npmBackup.oldVersion, to: p.latest, ok, kind: 'npm', output })
   }
   return { results }
+}
+
+/** 单包更新（含 npm/link/github，带回滚与热重启）。 */
+async function updateOne(
+  ctx: Context, config: Config, dir: string, deps: Record<string, string>, store: PluginStore,
+  p: { name: string; latest: string },
+): Promise<{ ok: boolean; output: string }> {
+  const spec = deps[p.name] ?? ''
+  if (isLinked(spec)) {
+    const target = resolveLinkTarget(dir, spec)
+    if (!target) return { ok: false, output: 'link 目录解析失败，请手动更新' }
+    const gitBackup = await backupGitState(runCmd, target, p.name)
+    if (gitBackup) {
+      const upd = await runGitUpdateWithRollback(runCmd, target, gitBackup)
+      store.addHistory({ name: p.name, from: gitBackup.oldCommit.slice(0, 8), to: null, ok: upd.ok, kind: 'git', output: upd.output })
+      return { ok: upd.ok, output: upd.output + (upd.rolledBack ? '（已回滚）' : '') }
+    }
+    const ghRepo = readGhRepo(target)
+    if (ghRepo) {
+      const gh = await githubLatest(ghRepo, null, 8000, config.githubToken || process.env.GITHUB_TOKEN || '')
+      if (gh) {
+        const dl = await runGithubDownloadUpdate(runCmd, target, { repo: ghRepo, version: gh.version, tarball: gh.tarball, tag: gh.tag }, p.name)
+        store.addHistory({ name: p.name, from: null, to: gh.version, ok: dl.ok, kind: 'git', output: dl.output })
+        return { ok: dl.ok, output: dl.output }
+      }
+    }
+    const plain = await tryGitUpdate(runCmd, target, p, { protectLocal: true })
+    store.addHistory({ name: p.name, from: null, to: null, ok: plain.ok, kind: 'git', output: plain.output })
+    return { ok: plain.ok, output: plain.output }
+  }
+  // npm 更新带备份/回滚
+  const npmBackup = backupNpmState(dir, p.name, p.latest)
+  const r = await runDsh(['plugin', '--profile', config.profile, 'add', `${p.name}@${p.latest}`], dir, 300000)
+  const raw = (r.stdout + r.stderr).trim()
+  const summary = raw.split(/\r?\n/).filter((l) => !/^\s*Progress:/i.test(l)).slice(-6).join('\n')
+  const output = summary || raw.slice(-800)
+  const ok = r.code === 0
+  const actual = npmInstalledVersion(dir, p.name)
+  let finalOk = ok
+  let finalOutput = output
+
+  // 验证 + 失败回滚
+  if (ok && actual !== null && isNewer(p.latest, actual)) {
+    finalOk = false
+    if (npmBackup.oldVersion) {
+      await runDsh(['plugin', '--profile', config.profile, 'add', `${p.name}@${npmBackup.oldVersion}`], dir, 300000)
+      finalOutput = `更新后版本(${actual})未达目标(${p.latest})，已回滚到 ${npmBackup.oldVersion}`
+    } else {
+      finalOutput = `更新后版本(${actual})未达目标(${p.latest})且无法回滚`
+    }
+  } else if (!ok && npmBackup.oldVersion && npmBackup.oldVersion !== p.latest) {
+    await runDsh(['plugin', '--profile', config.profile, 'add', `${p.name}@${npmBackup.oldVersion}`], dir, 300000)
+    finalOutput = `${output}\n执行失败，已回滚到 ${npmBackup.oldVersion}`
+  } else if (ok) {
+    // 3.4: 热重启（更新成功后重建 fiber，免手动重启）
+    const pkgDir = join(dir, 'node_modules', ...p.name.split('/'))
+    const hrel = await hotReloadPlugin(ctx, p.name, pkgDir)
+    finalOutput = summary ? `${summary}\n${hrel.output}` : hrel.output
+  }
+  store.addHistory({ name: p.name, from: npmBackup.oldVersion, to: p.latest, ok: finalOk, kind: 'npm', output: finalOutput })
+  return { ok: finalOk, output: finalOutput }
 }
 
 // 用 WeakMap 存每个 ctx 对应的 store，避免污染模块级单例。
