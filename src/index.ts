@@ -123,7 +123,7 @@ function readGhRepo(target: string): string | undefined {
 }
 
 /** 检查更新：直接依赖并发查 registry /latest + 本地 node_modules 版本比对。 */
-async function computeUpdates(profile: string, isIgnored?: (name: string) => boolean): Promise<UpdateResult> {
+async function computeUpdates(profile: string, isIgnored?: (name: string) => boolean, fetchTimeoutMs = 8000): Promise<UpdateResult> {
   const dir = profileDir(profile)
   const deps = readDependencies(profile)
   const linked: LinkItem[] = []
@@ -156,7 +156,7 @@ async function computeUpdates(profile: string, isIgnored?: (name: string) => boo
       // 无本地 git 但有 GitHub 仓库 → 查 GitHub releases（3.5）
       if (item.ghRepo && !item.homepage) {
         const repo = item.ghRepo
-        const gh = await githubLatest(repo, null, 8000, '')
+        const gh = await githubLatest(repo, null, fetchTimeoutMs, '')
         if (gh) return { ...item, ghLatest: gh.version, ghTag: gh.tag }
       }
       return item
@@ -165,7 +165,7 @@ async function computeUpdates(profile: string, isIgnored?: (name: string) => boo
   }
 
   const registry = readRegistryUrl(dir, dshHome())
-  const { npm, errors } = await checkNpmUpdates(dir, npmNames, registry, { timeoutMs: 8000, isIgnored })
+  const { npm, errors } = await checkNpmUpdates(dir, npmNames, registry, { timeoutMs: fetchTimeoutMs, isIgnored })
 
   const outdated: OutdatedItem[] = npm
     .filter((n): n is NpmItem & { current: string; latest: string } => n.outdated && !!n.current && !!n.latest)
@@ -181,7 +181,7 @@ async function checkUpdates(ctx: Context, config: Config, force = false): Promis
   if (!force && hit && now - hit.at < CACHE_TTL_MS) {
     return { ...hit.value, cached: true }
   }
-  const value = await computeUpdates(config.profile, (name) => st(ctx).isIgnored(name))
+  const value = await computeUpdates(config.profile, (name) => st(ctx).isIgnored(name), config.fetchTimeoutMs)
   CACHE.set(config.profile, { at: now, value })
 
   // P0-3.2：发现"新更新"→ 站内通知（去重）
@@ -230,7 +230,7 @@ async function checkMainUpdate(config: Config): Promise<{ current: string | null
     } catch { /* ignore */ }
   }
   const registry = readRegistryUrl(profileDir(config.profile), dshHome())
-  const latest = await fetchLatest(registry, '@deepseek-ai/dsh', 8000)
+  const latest = await fetchLatest(registry, '@deepseek-ai/dsh', config.fetchTimeoutMs)
   const outdated = !!current && !!latest && isNewer(latest, current)
   return { current, latest, outdated, updateable: config.allowCoreUpdates }
 }
