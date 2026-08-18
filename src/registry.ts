@@ -84,27 +84,28 @@ export function npmHomepage(name: string): string {
   return `https://www.npmjs.com/package/${encodeURIComponent(name)}`
 }
 
-/** 是否被忽略列表命中（预留给 3.9）。TODO(3.9): 接入持久化忽略。 */
-function isIgnored(_name: string): boolean {
-  return false
-}
+/** 是否被忽略列表命中（3.9 由调用方注入过滤）。 */
+export type IgnoredFn = (name: string) => boolean
 
-/**
- * 检查一批 npm 插件的更新（并发拉 /latest + 本地版本比对）。
- * 返回 npm[]（全部）+ 超集更新标记 + 错误列表。
- */
 export interface NpmCheckResult {
   npm: NpmItem[]
   errors: string[]
+}
+
+export interface NpmCheckOptions {
+  concurrency?: number
+  timeoutMs?: number
+  /** 3.9: 忽略过滤器（命中则不列入结果） */
+  isIgnored?: IgnoredFn
 }
 
 export async function checkNpmUpdates(
   dir: string,
   names: string[],
   registry: string,
-  opts: { concurrency?: number; timeoutMs?: number } = {},
+  opts: NpmCheckOptions = {},
 ): Promise<NpmCheckResult> {
-  const { concurrency = 8, timeoutMs = 8000 } = opts
+  const { concurrency = 8, timeoutMs = 8000, isIgnored } = opts
   const errors: string[] = []
   const npm: NpmItem[] = []
   if (!names.length) return { npm, errors }
@@ -115,7 +116,7 @@ export async function checkNpmUpdates(
     async ({ name }) => ({ name, latest: await fetchLatest(registry, name, timeoutMs) }),
   )
   for (const { name, latest } of fetched) {
-    if (isIgnored(name)) continue
+    if (isIgnored && isIgnored(name)) continue
     const home = npmHomepage(name)
     if (!latest) {
       npm.push({ name, current: installedVersion(dir, name), latest: null, outdated: false, error: '获取最新版本失败', homepage: home })

@@ -123,7 +123,7 @@ function readGhRepo(target: string): string | undefined {
 }
 
 /** 检查更新：直接依赖并发查 registry /latest + 本地 node_modules 版本比对。 */
-async function computeUpdates(profile: string): Promise<UpdateResult> {
+async function computeUpdates(profile: string, isIgnored?: (name: string) => boolean): Promise<UpdateResult> {
   const dir = profileDir(profile)
   const deps = readDependencies(profile)
   const linked: LinkItem[] = []
@@ -144,6 +144,7 @@ async function computeUpdates(profile: string): Promise<UpdateResult> {
 
   if (linked.length) {
     const statuses = await mapLimit(linked, 4, async (item) => {
+      if (isIgnored && isIgnored(item.name)) return { ...item, ignored: true }
       // 本地 git → 检测落后
       if (item.homepage) {
         const target = resolveLinkTarget(dir, item.spec)
@@ -164,7 +165,7 @@ async function computeUpdates(profile: string): Promise<UpdateResult> {
   }
 
   const registry = readRegistryUrl(dir, dshHome())
-  const { npm, errors } = await checkNpmUpdates(dir, npmNames, registry, { timeoutMs: 8000 })
+  const { npm, errors } = await checkNpmUpdates(dir, npmNames, registry, { timeoutMs: 8000, isIgnored })
 
   const outdated: OutdatedItem[] = npm
     .filter((n): n is NpmItem & { current: string; latest: string } => n.outdated && !!n.current && !!n.latest)
@@ -180,7 +181,7 @@ async function checkUpdates(ctx: Context, config: Config, force = false): Promis
   if (!force && hit && now - hit.at < CACHE_TTL_MS) {
     return { ...hit.value, cached: true }
   }
-  const value = await computeUpdates(config.profile)
+  const value = await computeUpdates(config.profile, (name) => st(ctx).isIgnored(name))
   CACHE.set(config.profile, { at: now, value })
 
   // P0-3.2：发现"新更新"→ 站内通知（去重）
@@ -420,6 +421,26 @@ export function apply(ctx: Context, config: Config): void {
       // POST /notifications/read
       if (req.method === 'POST' && pathname === '/notifications/read') {
         store.markAllRead()
+        writeJson(res, 200, { ok: true })
+        return
+      }
+      // POST /ignore（3.9）
+      if (req.method === 'POST' && pathname === '/ignore') {
+        let body: any = {}
+        try { body = JSON.parse(await readBody(req)) } catch { /* empty */ }
+        const name = typeof body?.name === 'string' ? body.name : null
+        if (!name) { writeJson(res, 400, { ok: false, error: '需要 name' }); return }
+        store.addIgnore(name, body?.kind === 'git' ? 'git' : 'npm')
+        writeJson(res, 200, { ok: true })
+        return
+      }
+      // POST /unignore（3.9）
+      if (req.method === 'POST' && pathname === '/unignore') {
+        let body: any = {}
+        try { body = JSON.parse(await readBody(req)) } catch { /* empty */ }
+        const name = typeof body?.name === 'string' ? body.name : null
+        if (!name) { writeJson(res, 400, { ok: false, error: '需要 name' }); return }
+        store.removeIgnore(name)
         writeJson(res, 200, { ok: true })
         return
       }

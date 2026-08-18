@@ -104,6 +104,27 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
     }, 5000)
   }, [])
 
+  // 3.9: 忽略列表 + 更新历史（从 /state 读）
+  const [ignoredNames, setIgnoredNames] = useState<Set<string>>(new Set())
+  const [history, setHistory] = useState<any[]>([])
+  const [showHistory, setShowHistory] = useState(false)
+
+  const loadState = useCallback(() => {
+    fetch(API + '/state', { headers: { 'content-type': 'application/json' } })
+      .then((r) => r.json())
+      .then((d: any) => {
+        const v = d?.value
+        if (!v) return
+        setIgnoredNames(new Set((v.ignored ?? []).map((i: any) => i.name)))
+        setHistory(Array.isArray(v.history) ? v.history : [])
+      })
+      .catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    loadState()
+  }, [loadState])
+
   const refresh = useCallback((force = false) => {
     setChecking(true)
     fetch(API + '/status' + (force ? '?force=1' : ''), { headers: { 'content-type': 'application/json' } })
@@ -135,6 +156,23 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
       .then((d: any) => { if (d?.ok) setMain(d.value?.main ?? null) })
       .catch(() => {})
   }, [])
+
+  const toggleIgnore = useCallback((name: string) => {
+    const ignoring = !ignoredNames.has(name)
+    fetch(API + (ignoring ? '/ignore' : '/unignore'), {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name }),
+    })
+      .then(() => {
+        setIgnoredNames((prev) => {
+          const next = new Set(prev)
+          if (ignoring) next.add(name); else next.delete(name)
+          return next
+        })
+        showToast(ignoring ? `已忽略 ${name} 的更新` : `已取消忽略 ${name}`, 'ok')
+        refresh(true)
+      })
+      .catch((e: any) => showToast('忽略操作失败: ' + e, 'err'))
+  }, [ignoredNames, refresh, showToast])
 
   useEffect(() => {
     refresh(false)
@@ -201,34 +239,43 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
           children: n.name,
         })
       : jsx('span', { style: C.name, children: n.name })
-    return jsxs('li', {
-      style,
-      children: [
-        nameNode,
-        n.error ? jsx('span', { style: { ...C.st, ...C.stErr }, children: n.error }, 'err')
-          : n.latest === null
-            ? jsx('span', { style: { ...C.st, ...C.stErr }, children: '获取失败' }, 'err')
-            : jsxs('span', {
-                style: { display: 'flex', alignItems: 'center', gap: 6 },
-                children: [
-                  jsx('span', { style: C.ver, children: n.current ?? '?' }),
-                  n.outdated ? jsx('span', { style: C.arrow, children: '→' }) : null,
-                  n.outdated ? jsx('span', { style: { ...C.ver, color: '#f0b43c' }, children: n.latest }) : null,
-                  n.outdated
-                    ? jsx('button', {
-                        style: { ...C.updateBtn, ...(isUpdating || busy ? C.btnDisabled : {}) },
-                        disabled: isUpdating || busy,
-                        onClick: (e: any) => {
-                          e.stopPropagation()
-                          if (n.latest) runUpdate([{ name: n.name, latest: n.latest }], '更新')
-                        },
-                        children: isUpdating ? jsx('span', { style: C.spinner, className: 'dshpu-spinner' }) : null,
-                      } as any, 'btn')
-                    : jsx('span', { style: { ...C.st, ...C.stOk }, children: '最新' }, 'ok'),
-                ],
-              }),
-      ],
-    }, 'npm-' + n.name)
+    // 状态区：错误/获取失败/版本+按钮
+    let statusNode: any
+    if (n.error) {
+      statusNode = jsx('span', { style: { ...C.st, ...C.stErr }, children: n.error }, 'err')
+    } else if (n.latest === null) {
+      statusNode = jsx('span', { style: { ...C.st, ...C.stErr }, children: '获取失败' }, 'err')
+    } else {
+      const verNode: any[] = [
+        jsx('span', { style: C.ver, children: n.current ?? '?' }),
+      ]
+      if (n.outdated) {
+        verNode.push(jsx('span', { style: C.arrow, children: '→' }, 'arr'))
+        verNode.push(jsx('span', { style: { ...C.ver, color: '#f0b43c' }, children: n.latest }, 'latest'))
+        verNode.push(jsx('button', {
+          style: { ...C.updateBtn, ...(isUpdating || busy ? C.btnDisabled : {}) },
+          disabled: isUpdating || busy,
+          onClick: (e: any) => {
+            e.stopPropagation()
+            if (n.latest) runUpdate([{ name: n.name, latest: n.latest }], '更新')
+          },
+          children: isUpdating ? jsx('span', { style: C.spinner }) : '更新',
+        }, 'btn'))
+      } else {
+        verNode.push(jsx('span', { style: { ...C.st, ...C.stOk }, children: '最新' }, 'ok'))
+      }
+      statusNode = jsxs('span', { style: { display: 'flex', alignItems: 'center', gap: 6 }, children: verNode })
+    }
+    const ignoreBtn = jsx('button', {
+      style: { background: 'transparent', border: 'none', color: 'var(--theme-text-secondary,#888)', fontSize: 10, cursor: 'pointer', padding: 2, whiteSpace: 'nowrap' },
+      title: ignoredNames.has(n.name) ? '取消忽略' : '忽略此插件更新',
+      onClick: (e: any) => {
+        e.stopPropagation()
+        toggleIgnore(n.name)
+      },
+      children: ignoredNames.has(n.name) ? '已忽略↩' : '忽略',
+    }, 'ignore-' + n.name)
+    return jsxs('li', { style, children: [nameNode, statusNode, ignoreBtn] }, 'npm-' + n.name)
   })
 
   // link 插件列表
@@ -282,7 +329,18 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
     }
     return jsxs('li', {
       style: { ...C.item, ...(isUpdatingNode ? C.itemUpdating : {}) },
-      children: [nameNode, statusNode, buttonNode],
+      children: [
+        nameNode, statusNode, buttonNode,
+        jsx('button', {
+          style: { background: 'transparent', border: 'none', color: 'var(--theme-text-secondary,#888)', fontSize: 10, cursor: 'pointer', padding: 2, whiteSpace: 'nowrap' },
+          title: ignoredNames.has(l.name) ? '取消忽略' : '忽略此插件更新',
+          onClick: (e: any) => {
+            e.stopPropagation()
+            toggleIgnore(l.name)
+          },
+          children: ignoredNames.has(l.name) ? '已忽略↩' : '忽略',
+        }, 'ignore-link-' + l.name),
+      ],
     }, 'link-' + l.name)
   })
 
@@ -378,6 +436,36 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
         ? jsx('p', { style: C.stats, children: '暂无插件信息' }, 'empty')
         : null,
       msg ? jsx('div', { style: { ...C.msg, ...(msgErr ? C.msgErr : {}) }, children: msg }) : null,
+      // 3.9: 更新历史（折叠）
+      jsxs('div', {
+        style: { marginTop: 12 },
+        children: [
+          jsx('button', {
+            style: { ...C.btnGhost, padding: '4px 10px', fontSize: 11, cursor: 'pointer' },
+            onClick: () => setShowHistory((v) => !v),
+            children: showHistory ? '收起更新历史' : `更新历史（${history.length}）`,
+          }),
+          showHistory && history.length
+            ? jsx('ul', {
+                style: { ...C.list, marginTop: 6, fontSize: 11, maxHeight: 180, overflow: 'auto' },
+                children: history.slice(0, 30).map((h: any) =>
+                  jsxs('li', {
+                    style: { padding: '4px 6px', color: h.ok ? 'inherit' : '#e74c3c' },
+                    children: [
+                      jsx('span', { children: `${h.at ? new Date(h.at).toLocaleString() : ''} ` }),
+                      jsx('span', { style: { fontWeight: 600 }, children: h.name }),
+                      jsx('span', { style: { color: 'var(--theme-text-secondary,#888)' }, children: h.from && h.to ? ` ${h.from} → ${h.to}` : '' }),
+                      jsx('span', { children: h.ok ? ' ✅' : ' ❌' }),
+                    ],
+                  }, 'hist-' + (h.at ?? '') + h.name),
+                ),
+              }, 'history')
+            : null,
+          !history.length && showHistory
+            ? jsx('p', { style: { ...C.stats, marginTop: 6 }, children: '（暂无更新记录）' }, 'hist-empty')
+            : null,
+        ],
+      }),
       jsx('p', {
         style: C.note,
         children: '说明：点插件名可打开官网/仓库；npm 插件可单独或全部更新；link 插件若为 git 仓库用「git 更新」同步，非 git 请手动更新。结果缓存 10 分钟，「重新检查」强制刷新。更新后需重启 DSH 生效。',
