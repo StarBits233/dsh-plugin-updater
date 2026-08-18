@@ -42,3 +42,9 @@ test('runGitUpdateWithRollback: 非 git 目录直接失败且不回滚', async (
   assert.equal(res.ok, false)
   assert.equal(res.rolledBack, false)
 })
+
+test('healLinkJunctions: 空目录或正常目录安全执行不崩溃', () => {
+  assert.equal(typeof updater.healLinkJunctions, 'function')
+  const healed = updater.healLinkJunctions('C:/Users/25294/.dsh/profiles/web')
+  assert.ok(Array.isArray(healed))
+})

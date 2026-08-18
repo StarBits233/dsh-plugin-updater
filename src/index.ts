@@ -29,7 +29,9 @@ import {
 import {
   gitRemoteHomepage, gitBehindStatus, tryGitUpdate, resolveLinkTarget,
 } from './git.js'
-import { backupNpmState, backupGitState, runNpmUpdateWithRollback, runGitUpdateWithRollback, runGithubDownloadUpdate } from './updater.js'
+import {
+  backupNpmState, backupGitState, runNpmUpdateWithRollback, runGitUpdateWithRollback, runGithubDownloadUpdate, healLinkJunctions,
+} from './updater.js'
 import { hotReloadPlugin } from './reload.js'
 import { githubLatest, parseGhRepo } from './github.js'
 import { isNewer } from './semver.js'
@@ -283,6 +285,12 @@ async function runUpdate(ctx: Context, config: Config, packages: { name: string;
     } finally {
       RUNNING_UPDATES.delete(p.name)
     }
+  }
+  // 更新完成后自动自愈检查 link 软链
+  try {
+    healLinkJunctions(dir)
+  } catch {
+    // best-effort
   }
   return { results }
 }

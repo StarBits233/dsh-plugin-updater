@@ -7,11 +7,61 @@
  * - npm：备份 = 记录当前安装版本；回滚 = `dsh plugin add name@旧版本`。
  * - git：备份 = 记录当前 HEAD commit；回滚 = `git reset --hard 旧commit`。
  */
-import { existsSync, readFileSync, mkdirSync, mkdtempSync, writeFileSync, readdirSync, statSync, copyFileSync, rmSync, createWriteStream, renameSync } from 'node:fs'
-import { join, dirname } from 'node:path'
+import { existsSync, readFileSync, mkdirSync, mkdtempSync, writeFileSync, readdirSync, statSync, copyFileSync, rmSync, createWriteStream, renameSync, symlinkSync, lstatSync } from 'node:fs'
+import { join, dirname, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { pipeline } from 'node:stream/promises'
 import { installedVersion } from './registry.js'
+
+/**
+ * 修复 profile 中的 link: 插件 Windows Junction 软链（防止 pnpm 升级后覆盖或破坏软链）。
+ */
+export function healLinkJunctions(profileDirPath: string): string[] {
+  const healed: string[] = []
+  const pkgPath = join(profileDirPath, 'package.json')
+  if (!existsSync(pkgPath)) return healed
+  let deps: Record<string, string> = {}
+  try {
+    const pkg = JSON.parse(readFileSync(pkgPath, 'utf8')) as { dependencies?: Record<string, string> }
+    deps = pkg.dependencies ?? {}
+  } catch {
+    return healed
+  }
+
+  for (const [name, spec] of Object.entries(deps)) {
+    if (!/^(?:link|file):|^\.{1,2}(?:[/\\]|$)/.test(spec)) continue
+    const rawTarget = spec.replace(/^(?:link|file):/, '').trim()
+    const target = resolve(profileDirPath, rawTarget)
+    if (!existsSync(target)) continue
+
+    const dest = join(profileDirPath, 'node_modules', ...name.split('/'))
+    let needRecreate = false
+    try {
+      if (!existsSync(dest)) {
+        needRecreate = true
+      } else {
+        const lst = lstatSync(dest)
+        if (!lst.isSymbolicLink() && !lst.isDirectory()) {
+          needRecreate = true
+        }
+      }
+    } catch {
+      needRecreate = true
+    }
+
+    if (needRecreate) {
+      try {
+        rmSync(dest, { recursive: true, force: true })
+        mkdirSync(dirname(dest), { recursive: true })
+        symlinkSync(target, dest, 'junction')
+        healed.push(name)
+      } catch {
+        // best-effort
+      }
+    }
+  }
+  return healed
+}
 
 export interface NpmBackup {
   kind: 'npm'
