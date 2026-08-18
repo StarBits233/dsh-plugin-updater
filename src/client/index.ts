@@ -301,4 +301,110 @@ export function apply(ctx: ClientContext): void {
       label: () => '插件更新',
     }, PluginUpdaterSection),
   ), 'dsh-plugin-updater: settings section')
+
+  // 3.2：站内通知铃铛（纯 DOM 独立挂载，参考 whale-girl 模式）
+  ctx.effect(() => mountBell(), 'dsh-plugin-updater: notification bell')
+}
+
+/** 站内通知铃铛：右上角徽标 + 弹窗列表。 */
+function mountBell(): () => void {
+  const root = document.getElementById('dshpu-bell-root')
+  if (root) return () => {} // 已挂载
+
+  const container = document.createElement('div')
+  container.id = 'dshpu-bell-root'
+  container.style.cssText = 'position:fixed;right:16px;bottom:16px;z-index:9999;font-family:inherit;'
+
+  const bell = document.createElement('button')
+  bell.style.cssText = 'position:relative;width:38px;height:38px;border-radius:50%;border:1px solid var(--theme-border,#333);background:var(--theme-input-bg,#111);color:var(--theme-text,#ddd);cursor:pointer;font-size:16px;box-shadow:0 2px 8px rgba(0,0,0,.25);'
+  bell.textContent = '🔔'
+  bell.title = '插件更新通知'
+
+  const badge = document.createElement('span')
+  badge.style.cssText = 'position:absolute;top:-4px;right:-4px;min-width:16px;height:16px;border-radius:8px;background:#e74c3c;color:#fff;font-size:10px;line-height:16px;text-align:center;padding:0 4px;display:none;'
+
+  const panel = document.createElement('div')
+  panel.style.cssText = 'display:none;position:absolute;bottom:46px;right:0;width:300px;max-height:360px;overflow:auto;background:var(--theme-input-bg,#151515);border:1px solid var(--theme-border,#333);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.4);color:var(--theme-text,#ddd);font-size:12px;'
+
+  const panelHeader = document.createElement('div')
+  panelHeader.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border-bottom:1px solid var(--theme-border,#333);font-weight:600;'
+  panelHeader.textContent = '更新通知'
+
+  const readAll = document.createElement('button')
+  readAll.style.cssText = 'background:transparent;border:1px solid var(--theme-border,#444);color:var(--theme-text,#ccc);border-radius:6px;padding:2px 8px;font-size:11px;cursor:pointer;'
+  readAll.textContent = '全部已读'
+
+  const list = document.createElement('div')
+  list.style.cssText = 'padding:4px 0;'
+
+  panelHeader.appendChild(readAll)
+  panel.appendChild(panelHeader)
+  panel.appendChild(list)
+  container.appendChild(bell)
+  bell.appendChild(badge)
+  container.appendChild(panel)
+  document.body.appendChild(container)
+
+  const empty = () => {
+    list.textContent = ''
+    const e = document.createElement('div')
+    e.style.cssText = 'padding:14px 10px;color:var(--theme-text-secondary,#888);text-align:center;'
+    e.textContent = '暂无更新通知'
+    list.appendChild(e)
+  }
+
+  const refresh = () => {
+    fetch('/@dsh-external/dsh-plugin-updater/api/state', { headers: { 'content-type': 'application/json' } })
+      .then((r) => r.json())
+      .then((d: any) => {
+        const state = d?.value
+        if (!state) return
+        const unread = state.unread ?? 0
+        badge.style.display = unread > 0 ? 'block' : 'none'
+        badge.textContent = String(unread > 99 ? '99+' : unread)
+        const notifs = Array.isArray(state.notifications) ? state.notifications : []
+        if (!notifs.length) { empty(); return }
+        list.textContent = ''
+        if (notifs.length) {
+          for (const n of notifs.slice(0, 20)) {
+            const row = document.createElement('div')
+            row.style.cssText = 'padding:8px 10px;border-bottom:1px solid var(--theme-border,#222);cursor:default;'
+            if (n.read) row.style.opacity = '.55'
+            const t = document.createElement('div')
+            t.style.cssText = 'font-weight:600;'
+            t.textContent = n.title
+            row.appendChild(t)
+            if (n.body) {
+              const b = document.createElement('div')
+              b.style.cssText = 'color:var(--theme-text-secondary,#888);font-size:11px;margin-top:2px;'
+              b.textContent = n.body
+              row.appendChild(b)
+            }
+            list.appendChild(row)
+          }
+        }
+      })
+      .catch(() => { /* 静默：宿主未就绪 */ })
+  }
+
+  readAll.addEventListener('click', () => {
+    fetch('/@dsh-external/dsh-plugin-updater/api/notifications/read', { method: 'POST', headers: { 'content-type': 'application/json' } })
+      .then(() => refresh())
+      .catch(() => {})
+  })
+
+  bell.addEventListener('click', () => {
+    const open = panel.style.display === 'block'
+    panel.style.display = open ? 'none' : 'block'
+    // 点开时即使刷新一次
+    if (!open) refresh()
+  })
+
+  refresh()
+  const interval = window.setInterval(refresh, 60_000)
+
+  return () => {
+    window.clearInterval(interval)
+    container.remove()
+  }
 }
