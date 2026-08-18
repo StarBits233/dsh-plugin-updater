@@ -487,6 +487,45 @@ export function apply(ctx: Context, config: Config): void {
         writeJson(res, 200, { ok: true, output: '已执行插件热重载' })
         return
       }
+      // POST /doctor
+      if (req.method === 'POST' && pathname === '/doctor') {
+        const dir = profileDir(config.profile)
+        const healed = healLinkJunctions(dir)
+        const deps = readDependencies(config.profile)
+        const missingDeps: string[] = []
+        for (const depName of Object.keys(deps)) {
+          const modPath = join(dir, 'node_modules', ...depName.split('/'))
+          if (!existsSync(modPath)) missingDeps.push(depName)
+        }
+        const healthy = healed.length === 0 && missingDeps.length === 0
+        writeJson(res, 200, {
+          ok: true,
+          value: {
+            healthy,
+            scanned: Object.keys(deps).length,
+            healedJunctions: healed,
+            missingDeps,
+          },
+        })
+        return
+      }
+      // POST /config
+      if (req.method === 'POST' && pathname === '/config') {
+        let body: any = {}
+        try { body = JSON.parse(await readBody(req)) } catch { /* empty */ }
+        if (typeof body?.checkIntervalMs === 'number') config.checkIntervalMs = body.checkIntervalMs
+        if (typeof body?.notifyNewUpdates === 'boolean') config.notifyNewUpdates = body.notifyNewUpdates
+        if (typeof body?.githubToken === 'string') config.githubToken = body.githubToken
+        writeJson(res, 200, {
+          ok: true,
+          value: {
+            checkIntervalMs: config.checkIntervalMs,
+            notifyNewUpdates: config.notifyNewUpdates,
+            githubToken: config.githubToken ? '已设置' : '',
+          },
+        })
+        return
+      }
       // GET /notifications
       if (req.method === 'GET' && pathname === '/notifications') {
         writeJson(res, 200, { ok: true, value: store.snapshot().notifications })

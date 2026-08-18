@@ -325,6 +325,70 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
   const totalIgnoredCount = state.npm.filter((n) => n.ignored || ignoredNames.has(n.name)).length + state.linked.filter((l) => l.ignored || ignoredNames.has(l.name)).length
   const updatingOne = (name: string) => updating.includes(name)
 
+  const allUpdatableList = [
+    ...outdatedNpm.map((n) => ({ name: n.name, latest: n.latest! })),
+    ...state.linked.filter((l) => !l.ignored && !ignoredNames.has(l.name) && (l.gitBehind || (!!l.ghLatest && !l.homepage))).map((l) => ({ name: l.name, latest: l.ghLatest || '' })),
+  ]
+
+  const [selectedPkgs, setSelectedPkgs] = useState<Set<string>>(new Set())
+  const [showConfig, setShowConfig] = useState(false)
+  const [cfgInterval, setCfgInterval] = useState<number>(6)
+  const [cfgNotify, setCfgNotify] = useState(true)
+  const [cfgToken, setCfgToken] = useState('')
+  const [doctorResult, setDoctorResult] = useState<any>(null)
+  const [doctorRunning, setDoctorRunning] = useState(false)
+
+  const toggleSelect = (name: string) => {
+    setSelectedPkgs((prev) => {
+      const next = new Set(prev)
+      if (next.has(name)) next.delete(name)
+      else next.add(name)
+      return next
+    })
+  }
+
+  const toggleSelectAll = () => {
+    if (selectedPkgs.size >= allUpdatableList.length) {
+      setSelectedPkgs(new Set())
+    } else {
+      setSelectedPkgs(new Set(allUpdatableList.map((p) => p.name)))
+    }
+  }
+
+  const runDoctor = () => {
+    setDoctorRunning(true)
+    fetch(API + '/doctor', { method: 'POST' })
+      .then((r) => r.json())
+      .then((d: any) => {
+        if (d?.ok) {
+          setDoctorResult(d.value)
+          showToast(d.value?.healthy ? '环境体检完成：依赖与软链一切正常！' : '环境体检完成：已自愈软链异常', 'ok')
+        }
+      })
+      .catch((e: any) => showToast('体检请求失败: ' + e, 'err'))
+      .finally(() => setDoctorRunning(false))
+  }
+
+  const saveConfig = () => {
+    fetch(API + '/config', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        checkIntervalMs: cfgInterval === 0 ? 0 : cfgInterval * 3600 * 1000,
+        notifyNewUpdates: cfgNotify,
+        githubToken: cfgToken.trim() || undefined,
+      }),
+    })
+      .then((r) => r.json())
+      .then((d: any) => {
+        if (d?.ok) {
+          showToast('配置已保存生效', 'ok')
+          setShowConfig(false)
+        }
+      })
+      .catch((e: any) => showToast('保存失败: ' + e, 'err'))
+  }
+
   const [searchQuery, setSearchQuery] = useState('')
   const [tab, setTab] = useState<'all' | 'outdated' | 'npm' | 'link' | 'ignored'>('all')
   const [activeChangelog, setActiveChangelog] = useState<{ name: string; loading: boolean; data?: any; error?: string } | null>(null)
@@ -485,7 +549,19 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
       statusNode = jsxs('span', { style: { display: 'flex', alignItems: 'center', gap: 6 }, children: verNode })
     }
 
-    const header = jsxs('div', { style: C.itemHeader, children: [nameNode, statusNode, ignoreNode].filter(Boolean) })
+    const checkboxNode = n.outdated
+      ? jsx('input', {
+          type: 'checkbox',
+          checked: selectedPkgs.has(n.name),
+          onChange: (e: any) => {
+            e.stopPropagation()
+            toggleSelect(n.name)
+          },
+          style: { marginRight: 8, cursor: 'pointer', accentColor: 'var(--dsw-alias-state-business-primary, #2563eb)' },
+        })
+      : null
+
+    const header = jsxs('div', { style: C.itemHeader, children: [checkboxNode, nameNode, statusNode, ignoreNode].filter(Boolean) })
     const desc = n.description ? jsx('div', { style: C.desc, title: n.description, children: n.description }) : null
     return jsxs('li', { style, children: [header, desc, renderChangelog(n.name)].filter(Boolean) }, 'npm-' + n.name)
   })
@@ -515,6 +591,8 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
     let ignoreNode: any = null
     const ghRepo = l.ghRepo
     const isGhUpdatable = !l.homepage && !isIgn && !!ghRepo && !!l.ghLatest
+    const isGitUpdatable = !!l.homepage && !isIgn && !!l.gitBehind
+    const isUpdatableLink = isGhUpdatable || isGitUpdatable
     const isUpdatingNode = isUpdating && buttonNode
 
     const verSpan = l.version ? jsx('span', { style: C.ver, children: l.version }, 'ver-' + l.name) : null
@@ -601,9 +679,21 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
       statusNode = jsxs('span', { style: { display: 'flex', alignItems: 'center', gap: 6 }, children: [verSpan, jsx('span', { style: { ...C.st, ...C.stLink }, children: '本地目录' })].filter(Boolean) })
     }
 
+    const checkboxNode = isUpdatableLink
+      ? jsx('input', {
+          type: 'checkbox',
+          checked: selectedPkgs.has(l.name),
+          onChange: (e: any) => {
+            e.stopPropagation()
+            toggleSelect(l.name)
+          },
+          style: { marginRight: 8, cursor: 'pointer', accentColor: 'var(--dsw-alias-state-business-primary, #2563eb)' },
+        })
+      : null
+
     const header = jsxs('div', {
       style: C.itemHeader,
-      children: [nameNode, statusNode, buttonNode, ignoreNode].filter(Boolean),
+      children: [checkboxNode, nameNode, statusNode, buttonNode, ignoreNode].filter(Boolean),
     })
     const desc = l.description ? jsx('div', { style: C.desc, title: l.description, children: l.description }) : null
     return jsxs('li', {
@@ -700,22 +790,131 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
         ],
       }) : null,
       jsxs('div', {
-        style: C.row,
+        style: { ...C.row, flexWrap: 'wrap', gap: 8 },
         children: [
           jsx('button', {
             style: { ...C.btn, ...C.btnGhost, ...(checking || busy ? C.btnDisabled : {}) },
             disabled: checking || busy,
             onClick: () => refresh(true),
-            children: checking ? '检查中…' : '重新检查',
+            children: checking ? '检查中…' : '🔄 重新检查',
+          }),
+          allUpdatableList.length > 0
+            ? jsx('button', {
+                style: { ...C.btn, ...(busy ? C.btnDisabled : {}) },
+                disabled: busy,
+                onClick: () => {
+                  const toUpdate = selectedPkgs.size > 0
+                    ? allUpdatableList.filter((p) => selectedPkgs.has(p.name))
+                    : allUpdatableList
+                  runUpdate(toUpdate, `更新所选 (${toUpdate.length})`)
+                },
+                children: busy ? '更新中…' : selectedPkgs.size > 0 ? `更新所选 (${selectedPkgs.size})` : `全部更新 (${allUpdatableList.length})`,
+              })
+            : null,
+          allUpdatableList.length > 0
+            ? jsx('button', {
+                style: { ...C.btnGhost, padding: '6px 12px', fontSize: 12.5, cursor: 'pointer', borderRadius: 8 },
+                onClick: toggleSelectAll,
+                children: selectedPkgs.size >= allUpdatableList.length && allUpdatableList.length > 0 ? '取消全选' : `全选 (${allUpdatableList.length})`,
+              })
+            : null,
+          jsx('button', {
+            style: { ...C.btnGhost, padding: '6px 12px', fontSize: 12.5, cursor: 'pointer', borderRadius: 8 },
+            disabled: doctorRunning,
+            onClick: runDoctor,
+            children: doctorRunning ? '体检中…' : '🩺 环境体检',
           }),
           jsx('button', {
-            style: { ...C.btn, ...(outdatedNpm.length === 0 || busy ? C.btnDisabled : {}) },
-            disabled: outdatedNpm.length === 0 || busy,
-            onClick: () => runUpdate(outdatedNpm.map((o) => ({ name: o.name, latest: o.latest! })), '全部'),
-            children: busy ? '更新中…' : `全部更新（${outdatedNpm.length}）`,
+            style: { ...C.btnGhost, padding: '6px 12px', fontSize: 12.5, cursor: 'pointer', borderRadius: 8 },
+            onClick: () => setShowConfig((v) => !v),
+            children: showConfig ? '收起设置 ⚙️' : '设置 ⚙️',
+          }),
+        ].filter(Boolean),
+      }),
+      showConfig ? jsxs('div', {
+        style: {
+          margin: '10px 0', padding: '12px 14px', borderRadius: 8,
+          background: 'var(--dsw-alias-bg-module-platform, rgba(128,128,128,0.06))',
+          border: '1px solid var(--dsw-alias-border-l2, rgba(128,128,128,0.25))',
+          fontSize: 13, display: 'flex', flexDirection: 'column', gap: 10,
+        },
+        children: [
+          jsx('div', { style: { fontWeight: 600, color: 'var(--dsw-alias-label-primary, #ddd)' }, children: '⚙️ 插件更新设置' }),
+          jsxs('div', {
+            style: { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' },
+            children: [
+              jsx('span', { style: { color: 'var(--dsw-alias-label-secondary, #888)' }, children: '自动定时检查周期：' }),
+              jsx('select', {
+                style: { padding: '4px 8px', borderRadius: 6, border: '1px solid var(--dsw-alias-border-l2, rgba(128,128,128,0.3))', background: 'var(--dsw-alias-bg-layer-1, transparent)', color: 'var(--dsw-alias-label-primary, #ddd)', fontSize: 12.5 },
+                value: cfgInterval,
+                onChange: (e: any) => setCfgInterval(Number(e.target.value)),
+                children: [
+                  jsx('option', { value: 1, children: '每 1 小时' }),
+                  jsx('option', { value: 3, children: '每 3 小时' }),
+                  jsx('option', { value: 6, children: '每 6 小时（推荐默认）' }),
+                  jsx('option', { value: 12, children: '每 12 小时' }),
+                  jsx('option', { value: 24, children: '每 24 小时' }),
+                  jsx('option', { value: 0, children: '仅手动检查（关闭定时）' }),
+                ],
+              }),
+            ],
+          }),
+          jsxs('div', {
+            style: { display: 'flex', alignItems: 'center', gap: 10 },
+            children: [
+              jsx('label', {
+                style: { display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', color: 'var(--dsw-alias-label-primary, #ddd)' },
+                children: [
+                  jsx('input', { type: 'checkbox', checked: cfgNotify, onChange: (e: any) => setCfgNotify(e.target.checked) }),
+                  '发现新版本时显示右下角铃铛通知',
+                ],
+              }),
+            ],
+          }),
+          jsxs('div', {
+            style: { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' },
+            children: [
+              jsx('span', { style: { color: 'var(--dsw-alias-label-secondary, #888)' }, children: 'GitHub Token（可选，提高配额）：' }),
+              jsx('input', {
+                type: 'password',
+                style: { padding: '4px 8px', borderRadius: 6, border: '1px solid var(--dsw-alias-border-l2, rgba(128,128,128,0.3))', background: 'var(--dsw-alias-bg-layer-1, transparent)', color: 'var(--dsw-alias-label-primary, #ddd)', fontSize: 12.5, minWidth: 200 },
+                placeholder: 'ghp_... (可留空)',
+                value: cfgToken,
+                onChange: (e: any) => setCfgToken(e.target.value),
+              }),
+            ],
+          }),
+          jsxs('div', {
+            style: { display: 'flex', gap: 8, marginTop: 4 },
+            children: [
+              jsx('button', { style: { ...C.btn, padding: '5px 14px', fontSize: 12 }, onClick: saveConfig, children: '保存配置' }),
+              jsx('button', { style: { ...C.btnGhost, padding: '5px 14px', fontSize: 12, cursor: 'pointer', borderRadius: 8 }, onClick: () => setShowConfig(false), children: '取消' }),
+            ],
           }),
         ],
-      }),
+      }) : null,
+      doctorResult ? jsxs('div', {
+        style: {
+          margin: '10px 0', padding: '12px 14px', borderRadius: 8,
+          background: doctorResult.healthy ? 'rgba(46,204,113,0.1)' : 'rgba(240,180,60,0.12)',
+          border: `1px solid ${doctorResult.healthy ? 'rgba(46,204,113,0.4)' : 'rgba(240,180,60,0.4)'}`,
+          fontSize: 12.5,
+        },
+        children: [
+          jsxs('div', {
+            style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
+            children: [
+              jsxs('span', {
+                style: { fontWeight: 600, color: doctorResult.healthy ? '#1e9e54' : '#d98b0f' },
+                children: [doctorResult.healthy ? '✅ 插件环境体检通过：' : '⚠️ 环境体检诊断完成：', `已扫描 ${doctorResult.scanned} 个插件依赖`],
+              }),
+              jsx('button', { style: { background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--dsw-alias-label-secondary, #888)' }, onClick: () => setDoctorResult(null), children: '✕' }),
+            ],
+          }),
+          doctorResult.healedJunctions?.length ? jsx('p', { style: { margin: '6px 0 0', color: 'var(--dsw-alias-label-primary, #ddd)' }, children: `🔧 已成功自动自愈 ${doctorResult.healedJunctions.length} 个软链 Junction：${doctorResult.healedJunctions.join(', ')}` }) : null,
+          doctorResult.missingDeps?.length ? jsx('p', { style: { margin: '6px 0 0', color: '#e74c3c' }, children: `⚠️ 缺失 node_modules 模块：${doctorResult.missingDeps.join(', ')}` }) : null,
+        ].filter(Boolean),
+      }) : null,
       hasItems ? jsxs('div', {
         style: { display: 'flex', gap: 8, alignItems: 'center', margin: '12px 0 8px', flexWrap: 'wrap' },
         children: [
