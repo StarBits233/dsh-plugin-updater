@@ -11,7 +11,7 @@
  *           作为 register 的第二个参数传入（与官方 skin-center / settings 系列一致）。
  */
 import { jsx, jsxs } from 'react/jsx-runtime'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 type ClientContext = {
   slots: any
@@ -32,8 +32,19 @@ const C: Record<string, any> = {
   btnDanger: { background: 'transparent', border: '1px solid #d33', color: '#d33' },
   btnDisabled: { opacity: 0.5, cursor: 'default' },
   section: { margin: '14px 0 6px', fontSize: 12, color: 'var(--theme-text-secondary,#999)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 },
+  grid: { listStyle: 'none', margin: 0, padding: 0, display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 8 },
   list: { listStyle: 'none', margin: 0, padding: 0 },
-  item: { display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', border: '1px solid var(--theme-border,#333)', borderRadius: 6, marginBottom: 6, background: 'var(--theme-input-bg,#111)' },
+  item: {
+    display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px',
+    border: '1px solid var(--theme-border,#333)', borderRadius: 10, marginBottom: 0,
+    background: 'var(--theme-input-bg,#111)', boxShadow: '0 1px 3px rgba(0,0,0,.15)', minHeight: 42,
+  },
+  itemUpdating: { borderColor: 'var(--theme-accent,#4f8cff)', boxShadow: '0 0 0 1px var(--theme-accent,#4f8cff)' },
+  spinner: {
+    display: 'inline-block', width: 10, height: 10, borderRadius: '50%', marginRight: 4,
+    border: '2px solid rgba(255,255,255,.2)', borderTopColor: 'var(--theme-accent,#4f8cff)',
+    animation: 'dshpu-spin .8s linear infinite', verticalAlign: 'middle',
+  },
   name: { fontWeight: 600, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   ver: { fontSize: 11, color: 'var(--theme-text-secondary,#888)', whiteSpace: 'nowrap' },
   arrow: { color: 'var(--theme-accent,#4f8cff)' },
@@ -81,6 +92,17 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
   const [updating, setUpdating] = useState<string[]>([]) // 正在更新的包名集合
   const [busy, setBusy] = useState(false) // 全部更新进行中
   const [main, setMain] = useState<any>(null) // 主程序状态（3.6）
+  // 3.8: toast
+  const [toasts, setToasts] = useState<{ id: number; text: string; kind: 'ok' | 'err' }[]>([])
+  const toastSeq = useRef(0)
+
+  const showToast = useCallback((text: string, kind: 'ok' | 'err' = 'ok') => {
+    const id = ++toastSeq.current
+    setToasts((prev) => [...prev, { id, text, kind }])
+    window.setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id))
+    }, 5000)
+  }, [])
 
   const refresh = useCallback((force = false) => {
     setChecking(true)
@@ -143,11 +165,17 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
         const lines = results.map((r: any) => `${r.ok ? '✅' : '❌'} ${r.name} → ${r.latest}${r.ok ? '' : '：' + r.output}`)
         setMsg(`更新完成：${okCount} 成功 / ${failCount} 失败\n\n${lines.join('\n')}\n\n⚠️ 请重启 DSH（托盘 → 重启服务）使新版本生效！`)
         setMsgErr(failCount > 0)
+        // 3.8: toast
+        showToast(failCount > 0
+          ? `更新完成：${okCount} 成功 / ${failCount} 失败`
+          : `已更新 ${okCount} 个插件（热重启已执行${results.some((r: any) => r.output?.includes('热重启')) ? '，免手动重启' : '，请重启 DSH'}）`,
+          failCount > 0 ? 'err' : 'ok')
         setTimeout(() => refresh(true), 1500)
       })
       .catch((e: any) => {
         setMsg('更新请求失败: ' + e)
         setMsgErr(true)
+        showToast('更新请求失败: ' + e, 'err')
       })
       .finally(() => {
         setBusy(false)
@@ -158,10 +186,10 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
   const outdatedNpm = state.npm.filter((n) => n.outdated)
   const updatingOne = (name: string) => updating.includes(name)
 
-  // npm 插件列表
+  // npm 插件列表（卡片）
   const npmItems: any[] = state.npm.map((n) => {
     const isUpdating = updatingOne(n.name)
-    const style: any = { ...C.item }
+    const style: any = { ...C.item, ...(isUpdating ? C.itemUpdating : {}) }
     const nameNode = n.homepage
       ? jsx('a', {
           style: { ...C.name, color: 'var(--theme-accent,#4f8cff)', cursor: 'pointer', textDecoration: 'none' },
@@ -194,8 +222,8 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
                           e.stopPropagation()
                           if (n.latest) runUpdate([{ name: n.name, latest: n.latest }], '更新')
                         },
-                        children: isUpdating ? '更新中…' : '更新',
-                      }, 'btn')
+                        children: isUpdating ? jsx('span', { style: C.spinner, className: 'dshpu-spinner' }) : null,
+                      } as any, 'btn')
                     : jsx('span', { style: { ...C.st, ...C.stOk }, children: '最新' }, 'ok'),
                 ],
               }),
@@ -222,6 +250,7 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
     let buttonNode: any = null
     const ghRepo = (l as any).ghRepo
     const isGhUpdatable = !!l.homepage === false && !!ghRepo && !!l.ghLatest
+    const isUpdatingNode = isUpdating && buttonNode
     if (!l.homepage && !ghRepo) {
       statusNode = jsx('span', { style: { ...C.st, ...C.stLink }, children: '本地目录（无远程）' }, 'local')
     } else if (isGhUpdatable) {
@@ -233,8 +262,8 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
           e.stopPropagation()
           runUpdate([{ name: l.name, latest: l.ghLatest! }], `更新 ${l.name}`)
         },
-        children: isUpdating ? '更新中…' : 'git 更新',
-      }, 'ghbtn')
+        children: isUpdating ? jsx('span', { style: C.spinner }) : 'git 更新',
+      } as any, 'ghbtn')
     } else if (l.homepage) {
       statusNode = l.gitBehind
         ? jsx('span', { style: { ...C.st, ...C.stOut }, children: `可更新（${l.gitBranch ?? 'git'}）` }, 'behind')
@@ -246,13 +275,13 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
           e.stopPropagation()
           runUpdate([{ name: l.name, latest: '' }], `更新 ${l.name}`)
         },
-        children: isUpdating ? '更新中…' : 'git 更新',
-      }, 'gitbtn')
+        children: isUpdating ? jsx('span', { style: C.spinner }) : 'git 更新',
+      } as any, 'gitbtn')
     } else {
       statusNode = jsx('span', { style: { ...C.st, ...C.stLink }, children: '本地目录' }, 'local2')
     }
     return jsxs('li', {
-      style: { ...C.item },
+      style: { ...C.item, ...(isUpdatingNode ? C.itemUpdating : {}) },
       children: [nameNode, statusNode, buttonNode],
     }, 'link-' + l.name)
   })
@@ -305,6 +334,7 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
   return jsxs('div', {
     style: C.page,
     children: [
+      jsx('style', { children: '@keyframes dshpu-spin{to{transform:rotate(360deg)}}' }),
       jsx('h3', { style: C.h3, children: '插件更新检查（dsh-plugin-updater）' }),
       jsx('p', { style: C.stats, children: stats }),
       mainNode,
@@ -332,7 +362,7 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
         ? jsxs('div', {
             children: [
               jsx('div', { style: C.section, children: 'npm 插件' }),
-              jsx('ul', { style: C.list, children: npmItems }),
+              jsx('ul', { style: C.grid, children: npmItems }),
             ],
           })
         : null,
@@ -340,7 +370,7 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
         ? jsxs('div', {
             children: [
               jsx('div', { style: C.section, children: '本地安装（link）' }),
-              jsx('ul', { style: C.list, children: linkItems }),
+              jsx('ul', { style: C.grid, children: linkItems }),
             ],
           })
         : null,
@@ -352,6 +382,22 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
         style: C.note,
         children: '说明：点插件名可打开官网/仓库；npm 插件可单独或全部更新；link 插件若为 git 仓库用「git 更新」同步，非 git 请手动更新。结果缓存 10 分钟，「重新检查」强制刷新。更新后需重启 DSH 生效。',
       }),
+      // 3.8: toast 容器
+      toasts.length
+        ? jsx('div', {
+            style: { position: 'fixed', top: 16, right: 16, zIndex: 10000, display: 'flex', flexDirection: 'column', gap: 8, maxWidth: 320 },
+            children: toasts.map((t) =>
+              jsx('div', {
+                style: {
+                  padding: '10px 14px', borderRadius: 8, fontSize: 12, whiteSpace: 'pre-wrap',
+                  background: t.kind === 'ok' ? 'rgba(46,204,113,.95)' : 'rgba(220,50,50,.95)',
+                  color: '#fff', boxShadow: '0 4px 12px rgba(0,0,0,.3)',
+                },
+                children: t.text,
+              }, 'toast-' + t.id),
+            ),
+          }, 'toasts')
+        : null,
     ],
   })
 }
