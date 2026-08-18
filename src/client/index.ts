@@ -48,8 +48,9 @@ const C: Record<string, any> = {
     border: '2px solid rgba(255,255,255,.25)', borderTopColor: '#fff',
     animation: 'dshpu-spin .8s linear infinite', verticalAlign: 'middle',
   },
-  name: { fontSize: 14, fontWeight: 600, color: 'var(--dsw-alias-label-primary, #ddd)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-  linkName: { fontSize: 14, fontWeight: 600, color: 'var(--dsw-alias-state-business-primary, #2563eb)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: 'pointer', textDecoration: 'none' },
+  nameWrapper: { flex: 1, minWidth: 0, display: 'flex', alignItems: 'center' },
+  name: { fontSize: 14, fontWeight: 600, color: 'var(--dsw-alias-label-primary, #ddd)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'inline-block', maxWidth: '100%' },
+  linkName: { fontSize: 14, fontWeight: 600, color: 'var(--dsw-alias-state-business-primary, #2563eb)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: 'pointer', textDecoration: 'none', display: 'inline-block', maxWidth: '100%' },
   ver: { fontSize: 12.5, color: 'var(--dsw-alias-label-secondary, #888)', whiteSpace: 'nowrap', fontWeight: 500 },
   arrow: { color: 'var(--dsw-alias-state-business-primary, #2563eb)', fontSize: 12 },
   st: { fontSize: 11.5, padding: '3px 8px', borderRadius: 6, whiteSpace: 'nowrap', fontWeight: 500 },
@@ -280,18 +281,21 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
   const npmItems: any[] = filteredNpm.map((n) => {
     const isUpdating = updatingOne(n.name)
     const style: any = { ...C.item, ...(isUpdating ? C.itemUpdating : {}) }
-    const nameNode = n.homepage
-      ? jsx('a', {
-          className: 'dshpu-link',
-          style: C.linkName,
-          href: n.homepage,
-          target: '_blank',
-          rel: 'noopener noreferrer',
-          onClick: (e: any) => e.stopPropagation(),
-          title: '打开 ' + n.homepage,
-          children: n.name,
-        })
-      : jsx('span', { style: C.name, children: n.name })
+    const nameNode = jsx('div', {
+      style: C.nameWrapper,
+      children: n.homepage
+        ? jsx('a', {
+            className: 'dshpu-link',
+            style: C.linkName,
+            href: n.homepage,
+            target: '_blank',
+            rel: 'noopener noreferrer',
+            onClick: (e: any) => e.stopPropagation(),
+            title: '打开 ' + n.homepage,
+            children: n.name,
+          })
+        : jsx('span', { style: C.name, children: n.name }),
+    })
     // 状态区：错误/获取失败/版本+按钮
     let statusNode: any
     if (n.error) {
@@ -337,18 +341,21 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
   // link 插件列表
   const linkItems: any[] = filteredLinked.map((l) => {
     const isUpdating = updatingOne(l.name)
-    const nameNode = l.homepage
-      ? jsx('a', {
-          className: 'dshpu-link',
-          style: C.linkName,
-          href: l.homepage,
-          target: '_blank',
-          rel: 'noopener noreferrer',
-          onClick: (e: any) => e.stopPropagation(),
-          title: '打开 ' + l.homepage,
-          children: l.name,
-        })
-      : jsx('span', { style: C.name, children: l.name })
+    const nameNode = jsx('div', {
+      style: C.nameWrapper,
+      children: l.homepage
+        ? jsx('a', {
+            className: 'dshpu-link',
+            style: C.linkName,
+            href: l.homepage,
+            target: '_blank',
+            rel: 'noopener noreferrer',
+            onClick: (e: any) => e.stopPropagation(),
+            title: '打开 ' + l.homepage,
+            children: l.name,
+          })
+        : jsx('span', { style: C.name, children: l.name }),
+    })
     // 状态区：无 git/GH → 本地目录；有 git → gitBehind 显示；无 git 有 GH → ghLatest 显示
     let statusNode: any
     let buttonNode: any = null
