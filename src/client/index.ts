@@ -27,7 +27,7 @@ const C: Record<string, any> = {
   h3: { margin: '0 0 8px', fontSize: 16, fontWeight: 600, color: 'var(--dsw-alias-label-primary, #ddd)' },
   stats: { color: 'var(--dsw-alias-label-secondary, #888)', fontSize: 12, margin: '0 0 12px' },
   row: { display: 'flex', gap: 8, margin: '10px 0', flexWrap: 'wrap', alignItems: 'center' },
-  btn: { background: 'var(--dsw-static-neutral-bluish-400, var(--dsw-alias-brand-primary, #4f8cff))', color: '#fff', border: 'none', borderRadius: 8, padding: '7px 16px', fontSize: 13, fontWeight: 500, cursor: 'pointer' },
+  btn: { background: 'var(--dsw-alias-state-business-primary, var(--dsw-alias-brand-primary, #2563eb))', color: '#fff', border: 'none', borderRadius: 8, padding: '7px 16px', fontSize: 13, fontWeight: 500, cursor: 'pointer' },
   btnGhost: { background: 'var(--dsw-alias-bg-module-platform, transparent)', border: '1px solid var(--dsw-alias-border-l2, rgba(128,128,128,0.25))', color: 'var(--dsw-alias-label-primary, #ddd)' },
   btnDanger: { background: 'transparent', border: '1px solid #d33', color: '#d33' },
   btnDisabled: { opacity: 0.45, cursor: 'default' },
@@ -42,21 +42,22 @@ const C: Record<string, any> = {
   },
   itemHeader: { display: 'flex', alignItems: 'center', gap: 8, width: '100%' },
   desc: { fontSize: 12, color: 'var(--dsw-alias-label-secondary, #888)', marginTop: 3, lineHeight: 1.4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-  itemUpdating: { borderColor: 'var(--dsw-static-neutral-bluish-400, #4f8cff)', boxShadow: '0 0 0 1px var(--dsw-static-neutral-bluish-400, #4f8cff)' },
+  itemUpdating: { borderColor: 'var(--dsw-alias-state-business-primary, #2563eb)', boxShadow: '0 0 0 1px var(--dsw-alias-state-business-primary, #2563eb)' },
   spinner: {
     display: 'inline-block', width: 11, height: 11, borderRadius: '50%', marginRight: 5,
     border: '2px solid rgba(255,255,255,.25)', borderTopColor: '#fff',
     animation: 'dshpu-spin .8s linear infinite', verticalAlign: 'middle',
   },
   name: { fontSize: 14, fontWeight: 600, color: 'var(--dsw-alias-label-primary, #ddd)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  linkName: { fontSize: 14, fontWeight: 600, color: 'var(--dsw-alias-state-business-primary, #2563eb)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: 'pointer', textDecoration: 'none' },
   ver: { fontSize: 12.5, color: 'var(--dsw-alias-label-secondary, #888)', whiteSpace: 'nowrap', fontWeight: 500 },
-  arrow: { color: 'var(--dsw-static-neutral-bluish-400, #4f8cff)', fontSize: 12 },
+  arrow: { color: 'var(--dsw-alias-state-business-primary, #2563eb)', fontSize: 12 },
   st: { fontSize: 11.5, padding: '3px 8px', borderRadius: 6, whiteSpace: 'nowrap', fontWeight: 500 },
   stOut: { background: 'rgba(240,180,60,0.18)', color: '#d98b0f' },
   stOk: { background: 'rgba(46,204,113,0.18)', color: '#1e9e54' },
   stLink: { background: 'rgba(128,128,128,0.14)', color: 'var(--dsw-alias-label-secondary, #777)' },
   stErr: { background: 'rgba(220,50,50,0.18)', color: '#e74c3c' },
-  updateBtn: { background: 'var(--dsw-static-neutral-bluish-400, var(--dsw-alias-brand-primary, #4f8cff))', color: '#fff', border: 'none', borderRadius: 6, padding: '4px 11px', fontSize: 12, fontWeight: 500, cursor: 'pointer', whiteSpace: 'nowrap' },
+  updateBtn: { background: 'var(--dsw-alias-state-business-primary, var(--dsw-alias-brand-primary, #2563eb))', color: '#fff', border: 'none', borderRadius: 6, padding: '4px 11px', fontSize: 12, fontWeight: 500, cursor: 'pointer', whiteSpace: 'nowrap' },
   msg: { marginTop: 12, padding: '10px 12px', borderRadius: 8, background: 'var(--dsw-alias-bg-module-platform, rgba(128,128,128,0.06))', border: '1px solid var(--dsw-alias-border-l2, rgba(128,128,128,0.2))', color: 'var(--dsw-alias-label-primary, #ddd)', whiteSpace: 'pre-wrap', maxHeight: 200, overflow: 'auto', fontSize: 12 },
   msgErr: { borderColor: '#d33', color: '#e74c3c' },
   note: { color: 'var(--dsw-alias-label-tertiary, var(--dsw-alias-label-secondary, #888))', fontSize: 12, marginTop: 10, lineHeight: 1.5 },
@@ -73,8 +74,8 @@ const C: Record<string, any> = {
     fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap', transition: 'all .15s',
   },
   tabBtnActive: {
-    background: 'var(--dsw-static-neutral-bluish-400, var(--dsw-alias-brand-primary, #4f8cff))',
-    borderColor: 'var(--dsw-static-neutral-bluish-400, var(--dsw-alias-brand-primary, #4f8cff))',
+    background: 'var(--dsw-alias-state-business-primary, var(--dsw-alias-brand-primary, #2563eb))',
+    borderColor: 'var(--dsw-alias-state-business-primary, var(--dsw-alias-brand-primary, #2563eb))',
     color: '#fff', fontWeight: 600,
   },
 }
@@ -281,7 +282,8 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
     const style: any = { ...C.item, ...(isUpdating ? C.itemUpdating : {}) }
     const nameNode = n.homepage
       ? jsx('a', {
-          style: { ...C.name, color: 'var(--dsw-static-neutral-bluish-400, var(--dsw-alias-brand-primary, #4f8cff))', cursor: 'pointer', textDecoration: 'none' },
+          className: 'dshpu-link',
+          style: C.linkName,
           href: n.homepage,
           target: '_blank',
           rel: 'noopener noreferrer',
@@ -337,7 +339,8 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
     const isUpdating = updatingOne(l.name)
     const nameNode = l.homepage
       ? jsx('a', {
-          style: { ...C.name, color: 'var(--dsw-static-neutral-bluish-400, var(--dsw-alias-brand-primary, #4f8cff))', cursor: 'pointer', textDecoration: 'none' },
+          className: 'dshpu-link',
+          style: C.linkName,
           href: l.homepage,
           target: '_blank',
           rel: 'noopener noreferrer',
@@ -418,7 +421,7 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
       : `主程序已是最新（${main.current ?? '?'}）`
     const style: any = {
       display: 'flex', alignItems: 'center', gap: 8, margin: '8px 0', padding: '9px 12px',
-      border: `1px solid ${outdated ? 'var(--dsw-static-neutral-bluish-400, #4f8cff)' : 'var(--dsw-alias-border-l2, rgba(128,128,128,0.2))'}`,
+      border: `1px solid ${outdated ? 'var(--dsw-alias-state-business-primary, #2563eb)' : 'var(--dsw-alias-border-l2, rgba(128,128,128,0.2))'}`,
       borderRadius: 8, background: 'var(--dsw-alias-bg-module-platform, var(--dsw-alias-bg-layer-2, rgba(128,128,128,0.06)))', fontSize: 13,
     }
     const btn = outdated && updateable
@@ -442,7 +445,7 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
     return jsxs('div', {
       style,
       children: [
-        jsx('span', { style: { color: outdated ? 'var(--theme-accent,#4f8cff)' : 'var(--theme-text-secondary,#888)' }, children: label }),
+        jsx('span', { style: { color: outdated ? 'var(--dsw-alias-state-business-primary, #2563eb)' : 'var(--dsw-alias-label-secondary, #888)' }, children: label }),
         btn,
       ],
     }, 'main-status')
@@ -454,7 +457,7 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
   return jsxs('div', {
     style: C.page,
     children: [
-      jsx('style', { children: '@keyframes dshpu-spin{to{transform:rotate(360deg)}}' }),
+      jsx('style', { children: '@keyframes dshpu-spin{to{transform:rotate(360deg)}} .dshpu-link:hover{text-decoration:underline !important;}' }),
       jsx('h3', { style: C.h3, children: '插件更新检查（dsh-plugin-updater）' }),
       jsx('p', { style: C.stats, children: stats }),
       mainNode,
