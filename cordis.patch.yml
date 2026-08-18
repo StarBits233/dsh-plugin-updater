@@ -1,0 +1,11 @@
+# dsh-plugin-updater bundle patch: 设置页「插件更新」section。
+#
+# 安装：`dsh plugin --profile web add <本目录路径>`（自动追加到 dsh.profile.bundles）
+# 生效：重启 dsh web / 桌面版后，设置 → 插件更新 出现检查/更新界面。
+#
+# host 半边（exports "."）在宿主进程运行：/status（并发查 registry /latest + 10 分钟缓存）与
+# /update（dsh plugin add 更新）路由 + Agent 工具；
+# client 半边（exports "./client"）在 web GUI 设置页挂载 section。
+- insert:
+    - id: dsh-plugin-updater
+      name: '@dsh-external/dsh-plugin-updater'
