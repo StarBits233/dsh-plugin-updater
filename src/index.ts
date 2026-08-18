@@ -30,6 +30,7 @@ import {
   gitRemoteHomepage, gitBehindStatus, tryGitUpdate, resolveLinkTarget,
 } from './git.js'
 import { backupNpmState, backupGitState, runGitUpdateWithRollback } from './updater.js'
+import { hotReloadPlugin } from './reload.js'
 import { isNewer } from './semver.js'
 import { Config as UpdaterConfigSchema, type Config as UpdaterConfigType } from './config.js'
 import { PluginStore } from './store.js'
@@ -231,6 +232,14 @@ async function runUpdate(ctx: Context, config: Config, packages: { name: string;
       results.push({ ...p, ok: false, output: `${output}\n执行失败，已回滚到 ${npmBackup.oldVersion}` })
     } else {
       results.push({ ...p, ok, output })
+      // 3.4: 热重启（更新成功后重建 fiber，免手动重启）
+      if (ok) {
+        const pkgDir = join(dir, 'node_modules', ...p.name.split('/'))
+        const hrel = await hotReloadPlugin(ctx, p.name, pkgDir)
+        results[results.length - 1].output = summary
+          ? `${summary}\n${hrel.output}`
+          : hrel.output
+      }
     }
     store.addHistory({ name: p.name, from: npmBackup.oldVersion, to: p.latest, ok, kind: 'npm', output })
   }
