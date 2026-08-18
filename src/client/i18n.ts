@@ -1,7 +1,10 @@
+export const NS = 'dsh-plugin-updater'
+
 export type Locale = 'zh' | 'en'
 
-export const translations = {
+export const dicts = {
   zh: {
+    nav: '插件更新',
     title: '插件更新检查（dsh-plugin-updater）',
     checking: '检查中…',
     recheck: '🔄 重新检查',
@@ -36,9 +39,6 @@ export const translations = {
     ignore: '忽略',
     unignore: '取消忽略',
     unignoreTitle: '恢复此插件的更新检查与提醒',
-    ignoreConfirm: (name: string) => `确定忽略 ${name} 的更新提醒？可在「已忽略」分类中随时恢复。`,
-    rollbackConfirm: (name: string, ver: string) => `确定将 ${name} 回滚降级到版本 ${ver}？`,
-    rollbackTo: (ver: string) => `↩ 回滚到 ${ver}`,
     viewOnGithub: '在 GitHub 查看 ↗',
     noNotes: '无更新说明',
     fetchingNotes: '正在拉取更新日志…',
@@ -73,18 +73,11 @@ export const translations = {
     configSaveFailed: '保存失败: ',
     doctorPass: '✅ 插件环境体检通过：',
     doctorWarn: '⚠️ 环境体检诊断完成：',
-    doctorScanned: (count: number) => `已扫描 ${count} 个插件依赖`,
-    doctorHealed: (healed: string[]) => `🔧 已成功自动自愈 ${healed.length} 个软链 Junction：${healed.join(', ')}`,
-    doctorMissing: (deps: string[]) => `⚠️ 缺失 node_modules 模块：${deps.join(', ')}`,
     doctorToastPass: '环境体检完成：依赖与软链一切正常！',
     doctorToastHealed: '环境体检完成：已自愈软链异常',
     doctorToastFailed: '体检请求失败: ',
     updateMainBtn: '更新主程序',
     updateMainConfirm: '确定更新 DSH 主程序？更新后需重启 DSH。',
-    mainStatusLatest: (ver: string) => `主程序已是最新（${ver}）`,
-    mainStatusOutdated: (cur: string, lat: string) => `主程序可更新：${cur} → ${lat}`,
-    statsText: (time: string, isCache: boolean, npm: number, npmOut: number, link: number, linkOut: number) =>
-      `检查时间: ${time} ${isCache ? '(缓存)' : ''} · ${npm} 个 npm 插件 · ${npmOut} 可更新 · ${link} 个 link (${linkOut} 可更新)`,
     notifTitle: '🔔 插件更新通知',
     notifMarkAllRead: '全部已读',
     notifClearAll: '清空通知',
@@ -93,6 +86,7 @@ export const translations = {
     footerNote: '说明：点插件名可打开官网/仓库；npm 插件可单独或全部更新；link 插件若为 git 仓库用「git 更新」同步，非 git 请手动更新。结果缓存 10 分钟，「重新检查」强制刷新。更新后需重启 DSH 生效。',
   },
   en: {
+    nav: 'Plugin Updates',
     title: 'Plugin Updates (dsh-plugin-updater)',
     checking: 'Checking…',
     recheck: '🔄 Refresh',
@@ -127,9 +121,6 @@ export const translations = {
     ignore: 'Ignore',
     unignore: 'Unignore',
     unignoreTitle: 'Restore update checks and alerts for this plugin',
-    ignoreConfirm: (name: string) => `Are you sure you want to ignore update notifications for ${name}? You can restore it anytime in the "Ignored" tab.`,
-    rollbackConfirm: (name: string, ver: string) => `Are you sure you want to rollback ${name} to version ${ver}?`,
-    rollbackTo: (ver: string) => `↩ Rollback to ${ver}`,
     viewOnGithub: 'View on GitHub ↗',
     noNotes: 'No release notes provided',
     fetchingNotes: 'Fetching changelog…',
@@ -164,18 +155,11 @@ export const translations = {
     configSaveFailed: 'Failed to save settings: ',
     doctorPass: '✅ Environment Health Check Passed:',
     doctorWarn: '⚠️ Health Doctor Diagnosis:',
-    doctorScanned: (count: number) => `Scanned ${count} plugin dependencies`,
-    doctorHealed: (healed: string[]) => `🔧 Successfully auto-healed ${healed.length} Windows junction links: ${healed.join(', ')}`,
-    doctorMissing: (deps: string[]) => `⚠️ Missing node_modules packages: ${deps.join(', ')}`,
     doctorToastPass: 'Health check completed: all dependencies and junctions are healthy!',
     doctorToastHealed: 'Health check completed: healed broken junctions',
     doctorToastFailed: 'Health check request failed: ',
     updateMainBtn: 'Update Core',
     updateMainConfirm: 'Are you sure you want to update DSH core? Restart required afterwards.',
-    mainStatusLatest: (ver: string) => `DSH Core is up to date (${ver})`,
-    mainStatusOutdated: (cur: string, lat: string) => `DSH Core update available: ${cur} → ${lat}`,
-    statsText: (time: string, isCache: boolean, npm: number, npmOut: number, link: number, linkOut: number) =>
-      `Checked: ${time} ${isCache ? '(cached)' : ''} · ${npm} npm plugins (${npmOut} updatable) · ${link} linked (${linkOut} updatable)`,
     notifTitle: '🔔 Plugin Update Notifications',
     notifMarkAllRead: 'Mark All Read',
     notifClearAll: 'Clear All',

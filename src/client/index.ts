@@ -1,25 +1,21 @@
 /**
  * @dsh-external/dsh-plugin-updater — client 侧（React section）
  *
- * 在「设置 → 插件更新」section 提供：
- *   - 进入页面自动检查（命中 10 分钟缓存则即时返回）+ 「重新检查」按钮（?force=1 强制刷新）
- *   - 全部 npm 插件列表（current → latest，有更新时高亮 + 单独「更新」按钮）
- *   - link 本地插件列表（灰色标注，手动更新，无 npm 版本）
- *   - 「全部更新」按钮（逐个调用 host /update）
- *
- * 挂点契约：ctx.slots.register(spec, ReactComponent) —— 组件必须是 React 函数组件，
- *           作为 register 的第二个参数传入（与官方 skin-center / settings 系列一致）。
+ * 挂点契约：ctx.slots.register(spec, ReactComponent) —— 组件是 React 函数组件，
+ *           遵循 DSH 原生国际化架构（ctx.locale.register + ctx.locale.bind + locale: NS），
+ *           自动与 DSH 通用设置中的语言（中文/English）深度联动切换。
  */
 import { jsx, jsxs } from 'react/jsx-runtime'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { translations, type Locale } from './i18n.js'
+import { NS, dicts } from './i18n.js'
 
 type ClientContext = {
   slots: any
   effect: any
+  locale: any
 }
 
-export const inject = ['slots']
+export const inject = ['slots', 'locale']
 
 const API = '/@dsh-external/dsh-plugin-updater/api'
 
@@ -113,11 +109,8 @@ interface LinkItem {
   homepage?: string
   gitBehind?: boolean
   gitBranch?: string
-  /** 3.5：package.json repository 推导的 GitHub owner/repo */
   ghRepo?: string | null
-  /** 3.5：GitHub 是否有新版本 */
   ghLatest?: string | null
-  /** 3.5：对应 GitHub tag */
   ghTag?: string | null
 }
 
@@ -129,58 +122,16 @@ interface UpdaterState {
   cached?: boolean
 }
 
-function getDshLocale(): Locale {
-  if (typeof document !== 'undefined') {
-    // 1. 检查 html 属性
-    const htmlLang = (document.documentElement.getAttribute('lang') || '').toLowerCase()
-    if (htmlLang.startsWith('zh')) return 'zh'
-    if (htmlLang.startsWith('en')) return 'en'
-
-    // 2. 检查设置菜单或导航中是否有中文系统特征词
-    const bodyText = document.body?.innerText || ''
-    if (bodyText.includes('通用设置') || bodyText.includes('打开配置文件')) {
-      return 'zh'
-    }
-    if (bodyText.includes('General') || bodyText.includes('Open configuration file') || bodyText.includes('Agent presets')) {
-      return 'en'
-    }
-  }
-
-  // 3. 检查系统/浏览器 navigator
-  if (typeof navigator !== 'undefined') {
-    return navigator.language?.toLowerCase().startsWith('zh') ? 'zh' : 'en'
-  }
-
-  return 'en'
-}
-
-function PluginUpdaterSection(_props: { close?: () => void }): any {
-  const [locale, setLocale] = useState<Locale>(() => getDshLocale())
-
-  useEffect(() => {
-    // 定时和观察 DOM 变化，自动跟随 DSH 通用设置中英文切换
-    const timer = setInterval(() => {
-      const detected = getDshLocale()
-      setLocale((prev) => (prev !== detected ? detected : prev))
-    }, 1000)
-
-    return () => clearInterval(timer)
-  }, [])
-
-  const changeLocale = (newLoc: Locale) => {
-    setLocale(newLoc)
-  }
-
-  const t = translations[locale] || translations.en
+function PluginUpdaterSection(props: { close?: () => void; t?: (key: string, params?: any) => string }): any {
+  const t = props.t ?? ((k: string) => dicts.zh[k as keyof typeof dicts.zh] || k)
 
   const [state, setState] = useState<UpdaterState>({ npm: [], linked: [], errors: [] })
   const [msg, setMsg] = useState('')
   const [msgErr, setMsgErr] = useState(false)
   const [checking, setChecking] = useState(true)
-  const [updating, setUpdating] = useState<string[]>([]) // 正在更新的包名集合
-  const [busy, setBusy] = useState(false) // 全部更新进行中
-  const [main, setMain] = useState<any>(null) // 主程序状态（3.6）
-  // 3.8: toast
+  const [updating, setUpdating] = useState<string[]>([])
+  const [busy, setBusy] = useState(false)
+  const [main, setMain] = useState<any>(null)
   const [toasts, setToasts] = useState<{ id: number; text: string; kind: 'ok' | 'err' }[]>([])
   const toastSeq = useRef(0)
 
@@ -192,7 +143,6 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
     }, 5000)
   }, [])
 
-  // 3.9: 忽略列表 + 更新历史（从 /state 读）
   const [ignoredNames, setIgnoredNames] = useState<Set<string>>(new Set())
   const [history, setHistory] = useState<any[]>([])
   const [showHistory, setShowHistory] = useState(false)
@@ -234,16 +184,16 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
         setMsgErr(false)
       })
       .catch((e: any) => {
-        setMsg('检查失败: ' + e)
+        setMsg(t('fetchFailed') + ': ' + e)
         setMsgErr(true)
       })
       .finally(() => setChecking(false))
-    // 3.6：顺带拉主程序状态
+
     fetch(API + '/state', { headers: { 'content-type': 'application/json' } })
       .then((r) => r.json())
       .then((d: any) => { if (d?.ok) setMain(d.value?.main ?? null) })
       .catch(() => {})
-  }, [])
+  }, [t])
 
   const toggleIgnore = useCallback((name: string) => {
     const ignoring = !ignoredNames.has(name)
@@ -256,11 +206,11 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
           if (ignoring) next.add(name); else next.delete(name)
           return next
         })
-        showToast(ignoring ? `已忽略 ${name} 的更新` : `已取消忽略 ${name}`, 'ok')
+        showToast(ignoring ? `${t('ignored')} ${name}` : `${t('unignore')} ${name}`, 'ok')
         refresh(true)
       })
-      .catch((e: any) => showToast('忽略操作失败: ' + e, 'err'))
-  }, [ignoredNames, refresh, showToast])
+      .catch((e: any) => showToast('Error: ' + e, 'err'))
+  }, [ignoredNames, refresh, showToast, t])
 
   useEffect(() => {
     refresh(false)
@@ -271,7 +221,7 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
     setBusy(true)
     const names = pkgs.map((p) => p.name)
     setUpdating(names)
-    setMsg(`${label} ${pkgs.length} (${locale === 'zh' ? '每个可能耗时数十秒' : 'may take a few seconds each'})…`)
+    setMsg(`${label} (${pkgs.length})…`)
     setMsgErr(false)
     fetch(API + '/update', {
       method: 'POST',
@@ -289,12 +239,9 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
         const okCount = results.filter((r: any) => r.ok).length
         const failCount = results.length - okCount
         const lines = results.map((r: any) => `${r.ok ? '✅' : '❌'} ${r.name} → ${r.latest}${r.ok ? '' : '：' + r.output}`)
-        setMsg(`${locale === 'zh' ? '更新完成' : 'Update Complete'}: ${okCount} ${locale === 'zh' ? '成功' : 'succeeded'} / ${failCount} ${locale === 'zh' ? '失败' : 'failed'}\n\n${lines.join('\n')}`)
+        setMsg(`${okCount} ok / ${failCount} fail\n\n${lines.join('\n')}`)
         setMsgErr(failCount > 0)
-        showToast(failCount > 0
-          ? `${locale === 'zh' ? '更新完成' : 'Update Complete'}: ${okCount} ${locale === 'zh' ? '成功' : 'ok'} / ${failCount} ${locale === 'zh' ? '失败' : 'failed'}`
-          : `${locale === 'zh' ? '已更新' : 'Updated'} ${okCount} ${locale === 'zh' ? '个插件' : 'plugins'}`,
-          failCount > 0 ? 'err' : 'ok')
+        showToast(failCount > 0 ? `${okCount} ok / ${failCount} fail` : `${t('update')} ${okCount}`, failCount > 0 ? 'err' : 'ok')
         if (okCount > 0) setNeedRestart(true)
         setTimeout(() => refresh(true), 1500)
       })
@@ -317,23 +264,23 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
     fetch(API + '/hot-reload', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({}) })
       .then((r) => r.json())
       .then((d: any) => {
-        showToast(d?.output || t.hotReloadDone, 'ok')
+        showToast(d?.output || t('hotReloadDone'), 'ok')
       })
-      .catch((e: any) => showToast(t.hotReloadFailed + e, 'err'))
+      .catch((e: any) => showToast(t('hotReloadFailed') + e, 'err'))
       .finally(() => setReloading(false))
   }
 
   const copyRestartCommand = () => {
     try {
       navigator.clipboard.writeText('dsh service restart')
-      showToast(t.copiedCmd, 'ok')
+      showToast(t('copiedCmd'), 'ok')
     } catch {
-      showToast(t.copyFailed, 'err')
+      showToast(t('copyFailed'), 'err')
     }
   }
 
   const runRollback = (name: string, targetVersion: string, kind: string) => {
-    if (!window.confirm(t.rollbackConfirm(name, targetVersion))) return
+    if (!window.confirm(`${t('rollbackTo')} ${name} → ${targetVersion}?`)) return
     setBusy(true)
     setMsg(`${name} → ${targetVersion}…`)
     fetch(API + '/rollback', {
@@ -405,10 +352,10 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
       .then((d: any) => {
         if (d?.ok) {
           setDoctorResult(d.value)
-          showToast(d.value?.healthy ? t.doctorToastPass : t.doctorToastHealed, 'ok')
+          showToast(d.value?.healthy ? t('doctorToastPass') : t('doctorToastHealed'), 'ok')
         }
       })
-      .catch((e: any) => showToast(t.doctorToastFailed + e, 'err'))
+      .catch((e: any) => showToast(t('doctorToastFailed') + e, 'err'))
       .finally(() => setDoctorRunning(false))
   }
 
@@ -425,11 +372,11 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
       .then((r) => r.json())
       .then((d: any) => {
         if (d?.ok) {
-          showToast(t.configSaved, 'ok')
+          showToast(t('configSaved'), 'ok')
           setShowConfig(false)
         }
       })
-      .catch((e: any) => showToast(t.configSaveFailed + e, 'err'))
+      .catch((e: any) => showToast(t('configSaveFailed') + e, 'err'))
   }
 
   const [searchQuery, setSearchQuery] = useState('')
@@ -448,7 +395,7 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
         if (d?.ok && d?.value) {
           setActiveChangelog({ name, loading: false, data: d.value })
         } else {
-          setActiveChangelog({ name, loading: false, error: d?.error || t.fetchNotesFailed })
+          setActiveChangelog({ name, loading: false, error: d?.error || t('fetchNotesFailed') })
         }
       })
       .catch((e: any) => {
@@ -463,7 +410,7 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
         style: C.changelogBox,
         children: jsxs('div', {
           style: { display: 'flex', alignItems: 'center', gap: 6, color: 'var(--dsw-alias-label-secondary, #888)', fontSize: 12 },
-          children: [jsx('span', { style: C.spinner }), t.fetchingNotes],
+          children: [jsx('span', { style: C.spinner }), t('fetchingNotes')],
         }),
       })
     }
@@ -474,13 +421,13 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
         jsxs('div', {
           style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, borderBottom: '1px solid var(--dsw-alias-border-l2, rgba(128,128,128,0.15))', paddingBottom: 4 },
           children: [
-            jsx('span', { style: { fontWeight: 600, color: 'var(--dsw-alias-label-primary, #ddd)', fontSize: 12.5 }, children: data?.title || `📝 ${t.notes}` }),
-            data?.htmlUrl ? jsx('a', { href: data.htmlUrl, target: '_blank', rel: 'noopener noreferrer', style: { fontSize: 11.5, color: 'var(--dsw-alias-state-business-primary, #2563eb)', textDecoration: 'none' }, children: t.viewOnGithub }) : null,
+            jsx('span', { style: { fontWeight: 600, color: 'var(--dsw-alias-label-primary, #ddd)', fontSize: 12.5 }, children: data?.title || `📝 ${t('notes')}` }),
+            data?.htmlUrl ? jsx('a', { href: data.htmlUrl, target: '_blank', rel: 'noopener noreferrer', style: { fontSize: 11.5, color: 'var(--dsw-alias-state-business-primary, #2563eb)', textDecoration: 'none' }, children: t('viewOnGithub') }) : null,
           ].filter(Boolean),
         }),
         jsx('div', {
           style: { fontSize: 12, color: 'var(--dsw-alias-label-secondary, #aaa)', whiteSpace: 'pre-wrap', maxHeight: 180, overflowY: 'auto', lineHeight: 1.5 },
-          children: data?.body || activeChangelog.error || t.noNotes,
+          children: data?.body || activeChangelog.error || t('noNotes'),
         }),
       ],
     })
@@ -535,20 +482,20 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
     let statusNode: any
     let ignoreNode: any = null
     if (isIgn) {
-      statusNode = jsx('span', { style: { ...C.st, ...C.stLink }, children: t.ignored }, 'ign')
+      statusNode = jsx('span', { style: { ...C.st, ...C.stLink }, children: t('ignored') }, 'ign')
       ignoreNode = jsx('button', {
         style: { ...C.btnGhost, padding: '3px 8px', fontSize: 11, cursor: 'pointer', borderRadius: 6 },
-        title: t.unignoreTitle,
+        title: t('unignoreTitle'),
         onClick: (e: any) => {
           e.stopPropagation()
           toggleIgnore(n.name)
         },
-        children: t.unignore,
+        children: t('unignore'),
       }, 'unign-' + n.name)
     } else if (n.error) {
       statusNode = jsx('span', { style: { ...C.st, ...C.stErr }, children: n.error }, 'err')
     } else if (n.latest === null) {
-      statusNode = jsx('span', { style: { ...C.st, ...C.stErr }, children: t.fetchFailed }, 'err')
+      statusNode = jsx('span', { style: { ...C.st, ...C.stErr }, children: t('fetchFailed') }, 'err')
     } else {
       const verNode: any[] = [
         jsx('span', { style: C.ver, children: n.current ?? '?' }),
@@ -558,35 +505,35 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
         verNode.push(jsx('span', { style: { ...C.ver, color: '#d98b0f' }, children: n.latest }, 'latest'))
         verNode.push(jsx('button', {
           style: { ...C.changelogBtn, ...(activeChangelog?.name === n.name ? { borderColor: 'var(--dsw-alias-state-business-primary, #2563eb)', color: 'var(--dsw-alias-state-business-primary, #2563eb)' } : {}) },
-          title: t.notes,
+          title: t('notes'),
           onClick: (e: any) => {
             e.stopPropagation()
             toggleChangelog(n.name, n.latest!)
           },
-          children: activeChangelog?.name === n.name ? t.hideNotes : t.notes,
+          children: activeChangelog?.name === n.name ? t('hideNotes') : t('notes'),
         }, 'clog-' + n.name))
         verNode.push(jsx('button', {
           style: { ...C.updateBtn, ...(isUpdating || busy ? C.btnDisabled : {}) },
           disabled: isUpdating || busy,
           onClick: (e: any) => {
             e.stopPropagation()
-            if (n.latest) runUpdate([{ name: n.name, latest: n.latest }], t.update)
+            if (n.latest) runUpdate([{ name: n.name, latest: n.latest }], t('update'))
           },
-          children: isUpdating ? jsx('span', { style: C.spinner }) : t.update,
+          children: isUpdating ? jsx('span', { style: C.spinner }) : t('update'),
         }, 'btn'))
         ignoreNode = jsx('button', {
           style: { background: 'transparent', border: 'none', color: 'var(--dsw-alias-label-tertiary, #888)', fontSize: 11, cursor: 'pointer', padding: '2px 4px', whiteSpace: 'nowrap' },
-          title: t.ignore,
+          title: t('ignore'),
           onClick: (e: any) => {
             e.stopPropagation()
-            if (window.confirm(t.ignoreConfirm(n.name))) {
+            if (window.confirm(`${t('ignore')} ${n.name}?`)) {
               toggleIgnore(n.name)
             }
           },
-          children: t.ignore,
+          children: t('ignore'),
         }, 'ignore-' + n.name)
       } else {
-        verNode.push(jsx('span', { style: { ...C.st, ...C.stOk }, children: t.latest }, 'ok'))
+        verNode.push(jsx('span', { style: { ...C.st, ...C.stOk }, children: t('latest') }, 'ok'))
       }
       statusNode = jsxs('span', { style: { display: 'flex', alignItems: 'center', gap: 6 }, children: verNode })
     }
@@ -638,18 +585,18 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
     const verSpan = l.version ? jsx('span', { style: C.ver, children: l.version }, 'ver-' + l.name) : null
 
     if (isIgn) {
-      statusNode = jsxs('span', { style: { display: 'flex', alignItems: 'center', gap: 6 }, children: [verSpan, jsx('span', { style: { ...C.st, ...C.stLink }, children: t.ignored })].filter(Boolean) })
+      statusNode = jsxs('span', { style: { display: 'flex', alignItems: 'center', gap: 6 }, children: [verSpan, jsx('span', { style: { ...C.st, ...C.stLink }, children: t('ignored') })].filter(Boolean) })
       buttonNode = jsx('button', {
         style: { ...C.btnGhost, padding: '3px 8px', fontSize: 11, cursor: 'pointer', borderRadius: 6 },
-        title: t.unignoreTitle,
+        title: t('unignoreTitle'),
         onClick: (e: any) => {
           e.stopPropagation()
           toggleIgnore(l.name)
         },
-        children: t.unignore,
+        children: t('unignore'),
       }, 'unign-' + l.name)
     } else if (!l.homepage && !ghRepo) {
-      statusNode = jsxs('span', { style: { display: 'flex', alignItems: 'center', gap: 6 }, children: [verSpan, jsx('span', { style: { ...C.st, ...C.stLink }, children: t.localNoRemote })].filter(Boolean) })
+      statusNode = jsxs('span', { style: { display: 'flex', alignItems: 'center', gap: 6 }, children: [verSpan, jsx('span', { style: { ...C.st, ...C.stLink }, children: t('localNoRemote') })].filter(Boolean) })
     } else if (isGhUpdatable) {
       statusNode = jsxs('span', {
         style: { display: 'flex', alignItems: 'center', gap: 6 },
@@ -659,12 +606,12 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
           jsx('span', { style: { ...C.st, ...C.stOut }, children: `GitHub ${l.ghTag ?? l.ghLatest}` }, 'ghbehind'),
           jsx('button', {
             style: { ...C.changelogBtn, ...(activeChangelog?.name === l.name ? { borderColor: 'var(--dsw-alias-state-business-primary, #2563eb)', color: 'var(--dsw-alias-state-business-primary, #2563eb)' } : {}) },
-            title: t.notes,
+            title: t('notes'),
             onClick: (e: any) => {
               e.stopPropagation()
               toggleChangelog(l.name, l.ghTag || l.ghLatest || '')
             },
-            children: activeChangelog?.name === l.name ? t.hideNotes : t.notes,
+            children: activeChangelog?.name === l.name ? t('hideNotes') : t('notes'),
           }, 'clog-' + l.name),
         ].filter(Boolean),
       })
@@ -673,50 +620,50 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
         disabled: isUpdating || busy,
         onClick: (e: any) => {
           e.stopPropagation()
-          runUpdate([{ name: l.name, latest: l.ghLatest! }], `${t.update} ${l.name}`)
+          runUpdate([{ name: l.name, latest: l.ghLatest! }], `${t('update')} ${l.name}`)
         },
-        children: isUpdating ? jsx('span', { style: C.spinner }) : t.gitUpdate,
+        children: isUpdating ? jsx('span', { style: C.spinner }) : t('gitUpdate'),
       } as any, 'ghbtn')
       ignoreNode = jsx('button', {
         style: { background: 'transparent', border: 'none', color: 'var(--dsw-alias-label-tertiary, #888)', fontSize: 11, cursor: 'pointer', padding: '2px 4px', whiteSpace: 'nowrap' },
-        title: t.ignore,
+        title: t('ignore'),
         onClick: (e: any) => {
           e.stopPropagation()
-          if (window.confirm(t.ignoreConfirm(l.name))) {
+          if (window.confirm(`${t('ignore')} ${l.name}?`)) {
             toggleIgnore(l.name)
           }
         },
-        children: t.ignore,
+        children: t('ignore'),
       }, 'ignore-' + l.name)
     } else if (l.homepage) {
       const gitStatusBadge = l.gitBehind
-        ? jsx('span', { style: { ...C.st, ...C.stOut }, children: `${t.updatable} (${l.gitBranch ?? 'git'})` }, 'behind')
-        : jsx('span', { style: { ...C.st, ...C.stOk }, children: t.isLatest }, 'ok')
+        ? jsx('span', { style: { ...C.st, ...C.stOut }, children: `${t('updatable')} (${l.gitBranch ?? 'git'})` }, 'behind')
+        : jsx('span', { style: { ...C.st, ...C.stOk }, children: t('isLatest') }, 'ok')
       statusNode = jsxs('span', { style: { display: 'flex', alignItems: 'center', gap: 6 }, children: [verSpan, gitStatusBadge].filter(Boolean) })
       buttonNode = jsx('button', {
         style: { ...C.updateBtn, ...((isUpdating || busy || !l.gitBehind) ? C.btnDisabled : {}) },
         disabled: isUpdating || busy || !l.gitBehind,
         onClick: (e: any) => {
           e.stopPropagation()
-          runUpdate([{ name: l.name, latest: '' }], `${t.update} ${l.name}`)
+          runUpdate([{ name: l.name, latest: '' }], `${t('update')} ${l.name}`)
         },
-        children: isUpdating ? jsx('span', { style: C.spinner }) : t.gitUpdate,
+        children: isUpdating ? jsx('span', { style: C.spinner }) : t('gitUpdate'),
       } as any, 'gitbtn')
       if (l.gitBehind) {
         ignoreNode = jsx('button', {
           style: { background: 'transparent', border: 'none', color: 'var(--dsw-alias-label-tertiary, #888)', fontSize: 11, cursor: 'pointer', padding: '2px 4px', whiteSpace: 'nowrap' },
-          title: t.ignore,
+          title: t('ignore'),
           onClick: (e: any) => {
             e.stopPropagation()
-            if (window.confirm(t.ignoreConfirm(l.name))) {
+            if (window.confirm(`${t('ignore')} ${l.name}?`)) {
               toggleIgnore(l.name)
             }
           },
-          children: t.ignore,
+          children: t('ignore'),
         }, 'ignore-' + l.name)
       }
     } else {
-      statusNode = jsxs('span', { style: { display: 'flex', alignItems: 'center', gap: 6 }, children: [verSpan, jsx('span', { style: { ...C.st, ...C.stLink }, children: t.localDir })].filter(Boolean) })
+      statusNode = jsxs('span', { style: { display: 'flex', alignItems: 'center', gap: 6 }, children: [verSpan, jsx('span', { style: { ...C.st, ...C.stLink }, children: t('localDir') })].filter(Boolean) })
     }
 
     const checkboxNode = isUpdatableLink
@@ -742,14 +689,7 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
     }, 'link-' + l.name)
   })
 
-  const stats = t.statsText(
-    new Date(state.checkedAt ?? Date.now()).toLocaleString(),
-    !!state.cached,
-    state.npm.length,
-    outdatedNpm.length,
-    state.linked.length,
-    linkUpdatableCount,
-  )
+  const stats = `${new Date(state.checkedAt ?? Date.now()).toLocaleString()}${state.cached ? ' (cached)' : ''} · ${state.npm.length} ${t('npmSection')} (${outdatedNpm.length} ${t('updatable')}) · ${state.linked.length} ${t('linkSection')} (${linkUpdatableCount} ${t('updatable')})`
 
   // 主程序状态条（3.6）
   const mainNode = (() => {
@@ -757,8 +697,8 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
     const updateable = !!main.updateable
     const outdated = !!main.outdated
     const label = outdated
-      ? t.mainStatusOutdated(main.current ?? '?', main.latest ?? '?')
-      : t.mainStatusLatest(main.current ?? '?')
+      ? `${t('updateMainBtn')}: ${main.current} → ${main.latest}`
+      : `${t('isLatest')}: ${main.current ?? '?'}`
     const style: any = {
       display: 'flex', alignItems: 'center', gap: 8, margin: '8px 0', padding: '9px 12px',
       border: `1px solid ${outdated ? 'var(--dsw-alias-state-business-primary, #2563eb)' : 'var(--dsw-alias-border-l2, rgba(128,128,128,0.2))'}`,
@@ -769,7 +709,7 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
           style: { ...C.updateBtn },
           onClick: (e: any) => {
             e.stopPropagation()
-            if (!window.confirm(t.updateMainConfirm)) return
+            if (!window.confirm(t('updateMainConfirm'))) return
             fetch(API + '/update-main', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirm: true }) })
               .then((r) => r.json())
               .then((d: any) => {
@@ -779,7 +719,7 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
               })
               .catch((err: any) => { setMsg('Error: ' + err); setMsgErr(true) })
           },
-          children: t.updateMainBtn,
+          children: t('updateMainBtn'),
         }, 'mainbtn')
       : null
     return jsxs('div', {
@@ -798,17 +738,7 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
     style: C.page,
     children: [
       jsx('style', { children: '@keyframes dshpu-spin{to{transform:rotate(360deg)}} .dshpu-link:hover{text-decoration:underline !important;}' }),
-      jsxs('div', {
-        style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
-        children: [
-          jsx('h3', { style: { ...C.h3, margin: 0 }, children: t.title }),
-          jsx('button', {
-            style: { ...C.btnGhost, padding: '3px 9px', fontSize: 11.5, cursor: 'pointer', borderRadius: 6 },
-            onClick: () => changeLocale(locale === 'zh' ? 'en' : 'zh'),
-            children: locale === 'zh' ? '🌐 English' : '🌐 简体中文',
-          }),
-        ],
-      }),
+      jsx('h3', { style: C.h3, children: t('title') }),
       jsx('p', { style: C.stats, children: stats }),
       mainNode,
       needRestart ? jsxs('div', {
@@ -823,7 +753,7 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
             style: { display: 'flex', alignItems: 'center', gap: 6 },
             children: [
               jsx('span', { style: { fontSize: 16 }, children: '⚡' }),
-              jsx('span', { style: { fontWeight: 500 }, children: t.restartBanner }),
+              jsx('span', { style: { fontWeight: 500 }, children: t('restartBanner') }),
             ],
           }),
           jsxs('div', {
@@ -833,12 +763,12 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
                 style: { ...C.btnGhost, padding: '4px 10px', fontSize: 12, cursor: 'pointer', borderRadius: 6 },
                 onClick: triggerHotReload,
                 disabled: reloading,
-                children: reloading ? t.hotReloading : t.hotReload,
+                children: reloading ? t('hotReloading') : t('hotReload'),
               }),
               jsx('button', {
                 style: { ...C.btnGhost, padding: '4px 10px', fontSize: 12, cursor: 'pointer', borderRadius: 6 },
                 onClick: copyRestartCommand,
-                children: t.copyRestartCmd,
+                children: t('copyRestartCmd'),
               }),
             ],
           }),
@@ -851,7 +781,7 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
             style: { ...C.btn, ...C.btnGhost, ...(checking || busy ? C.btnDisabled : {}) },
             disabled: checking || busy,
             onClick: () => refresh(true),
-            children: checking ? t.checking : t.recheck,
+            children: checking ? t('checking') : t('recheck'),
           }),
           jsx('button', {
             style: {
@@ -863,31 +793,31 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
               const toUpdate = selectedPkgs.size > 0
                 ? allUpdatableList.filter((p) => selectedPkgs.has(p.name))
                 : allUpdatableList
-              runUpdate(toUpdate, selectedPkgs.size > 0 ? `${t.updateSelected} (${toUpdate.length})` : t.updateAll)
+              runUpdate(toUpdate, selectedPkgs.size > 0 ? `${t('updateSelected')} (${toUpdate.length})` : t('updateAll'))
             },
             children: busy
-              ? t.updating
+              ? t('updating')
               : selectedPkgs.size > 0
-              ? `${t.updateSelected}（${selectedPkgs.size}）`
-              : `${t.updateAll}（${allUpdatableList.length}）`,
+              ? `${t('updateSelected')}（${selectedPkgs.size}）`
+              : `${t('updateAll')}（${allUpdatableList.length}）`,
           }),
           allUpdatableList.length > 0
             ? jsx('button', {
                 style: { ...C.btnGhost, padding: '6px 12px', fontSize: 12.5, cursor: 'pointer', borderRadius: 8 },
                 onClick: toggleSelectAll,
-                children: selectedPkgs.size >= allUpdatableList.length && allUpdatableList.length > 0 ? t.deselectAll : `${t.selectAll} (${allUpdatableList.length})`,
+                children: selectedPkgs.size >= allUpdatableList.length && allUpdatableList.length > 0 ? t('deselectAll') : `${t('selectAll')} (${allUpdatableList.length})`,
               })
             : null,
           jsx('button', {
             style: { ...C.btnGhost, padding: '6px 12px', fontSize: 12.5, cursor: 'pointer', borderRadius: 8 },
             disabled: doctorRunning,
             onClick: runDoctor,
-            children: doctorRunning ? t.healthChecking : t.healthCheck,
+            children: doctorRunning ? t('healthChecking') : t('healthCheck'),
           }),
           jsx('button', {
             style: { ...C.btnGhost, padding: '6px 12px', fontSize: 12.5, cursor: 'pointer', borderRadius: 8 },
             onClick: () => setShowConfig((v) => !v),
-            children: showConfig ? t.closeSettings : t.settings,
+            children: showConfig ? t('closeSettings') : t('settings'),
           }),
         ].filter(Boolean),
       }),
@@ -899,22 +829,22 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
           fontSize: 13, display: 'flex', flexDirection: 'column', gap: 10,
         },
         children: [
-          jsx('div', { style: { fontWeight: 600, color: 'var(--dsw-alias-label-primary, #ddd)' }, children: t.settingsTitle }),
+          jsx('div', { style: { fontWeight: 600, color: 'var(--dsw-alias-label-primary, #ddd)' }, children: t('settingsTitle') }),
           jsxs('div', {
             style: { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' },
             children: [
-              jsx('span', { style: { color: 'var(--dsw-alias-label-secondary, #888)' }, children: t.checkIntervalLabel }),
+              jsx('span', { style: { color: 'var(--dsw-alias-label-secondary, #888)' }, children: t('checkIntervalLabel') }),
               jsx('select', {
                 style: { padding: '4px 8px', borderRadius: 6, border: '1px solid var(--dsw-alias-border-l2, rgba(128,128,128,0.3))', background: 'var(--dsw-alias-bg-layer-1, transparent)', color: 'var(--dsw-alias-label-primary, #ddd)', fontSize: 12.5 },
                 value: cfgInterval,
                 onChange: (e: any) => setCfgInterval(Number(e.target.value)),
                 children: [
-                  jsx('option', { value: 1, children: t.interval1h }),
-                  jsx('option', { value: 3, children: t.interval3h }),
-                  jsx('option', { value: 6, children: t.interval6h }),
-                  jsx('option', { value: 12, children: t.interval12h }),
-                  jsx('option', { value: 24, children: t.interval24h }),
-                  jsx('option', { value: 0, children: t.intervalManual }),
+                  jsx('option', { value: 1, children: t('interval1h') }),
+                  jsx('option', { value: 3, children: t('interval3h') }),
+                  jsx('option', { value: 6, children: t('interval6h') }),
+                  jsx('option', { value: 12, children: t('interval12h') }),
+                  jsx('option', { value: 24, children: t('interval24h') }),
+                  jsx('option', { value: 0, children: t('intervalManual') }),
                 ],
               }),
             ],
@@ -926,7 +856,7 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
                 style: { display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', color: 'var(--dsw-alias-label-primary, #ddd)' },
                 children: [
                   jsx('input', { type: 'checkbox', checked: cfgNotify, onChange: (e: any) => setCfgNotify(e.target.checked) }),
-                  t.notifyLabel,
+                  t('notifyLabel'),
                 ],
               }),
             ],
@@ -934,11 +864,11 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
           jsxs('div', {
             style: { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' },
             children: [
-              jsx('span', { style: { color: 'var(--dsw-alias-label-secondary, #888)' }, children: t.githubTokenLabel }),
+              jsx('span', { style: { color: 'var(--dsw-alias-label-secondary, #888)' }, children: t('githubTokenLabel') }),
               jsx('input', {
                 type: 'password',
                 style: { padding: '4px 8px', borderRadius: 6, border: '1px solid var(--dsw-alias-border-l2, rgba(128,128,128,0.3))', background: 'var(--dsw-alias-bg-layer-1, transparent)', color: 'var(--dsw-alias-label-primary, #ddd)', fontSize: 12.5, minWidth: 200 },
-                placeholder: t.githubTokenPlaceholder,
+                placeholder: t('githubTokenPlaceholder'),
                 value: cfgToken,
                 onChange: (e: any) => setCfgToken(e.target.value),
               }),
@@ -947,8 +877,8 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
           jsxs('div', {
             style: { display: 'flex', gap: 8, marginTop: 4 },
             children: [
-              jsx('button', { style: { ...C.btn, padding: '5px 14px', fontSize: 12 }, onClick: saveConfig, children: t.saveConfig }),
-              jsx('button', { style: { ...C.btnGhost, padding: '5px 14px', fontSize: 12, cursor: 'pointer', borderRadius: 8 }, onClick: () => setShowConfig(false), children: t.cancel }),
+              jsx('button', { style: { ...C.btn, padding: '5px 14px', fontSize: 12 }, onClick: saveConfig, children: t('saveConfig') }),
+              jsx('button', { style: { ...C.btnGhost, padding: '5px 14px', fontSize: 12, cursor: 'pointer', borderRadius: 8 }, onClick: () => setShowConfig(false), children: t('cancel') }),
             ],
           }),
         ],
@@ -966,13 +896,13 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
             children: [
               jsxs('span', {
                 style: { fontWeight: 600, color: doctorResult.healthy ? '#1e9e54' : '#d98b0f' },
-                children: [doctorResult.healthy ? t.doctorPass : t.doctorWarn, ` ${t.doctorScanned(doctorResult.scanned)}`],
+                children: [doctorResult.healthy ? t('doctorPass') : t('doctorWarn'), ` (scanned: ${doctorResult.scanned ?? 0})`],
               }),
               jsx('button', { style: { background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--dsw-alias-label-secondary, #888)' }, onClick: () => setDoctorResult(null), children: '✕' }),
             ],
           }),
-          doctorResult.healedJunctions?.length ? jsx('p', { style: { margin: '6px 0 0', color: 'var(--dsw-alias-label-primary, #ddd)' }, children: t.doctorHealed(doctorResult.healedJunctions) }) : null,
-          doctorResult.missingDeps?.length ? jsx('p', { style: { margin: '6px 0 0', color: '#e74c3c' }, children: t.doctorMissing(doctorResult.missingDeps) }) : null,
+          doctorResult.healedJunctions?.length ? jsx('p', { style: { margin: '6px 0 0', color: 'var(--dsw-alias-label-primary, #ddd)' }, children: `🔧 ${doctorResult.healedJunctions.length} junctions healed: ${doctorResult.healedJunctions.join(', ')}` }) : null,
+          doctorResult.missingDeps?.length ? jsx('p', { style: { margin: '6px 0 0', color: '#e74c3c' }, children: `⚠️ Missing modules: ${doctorResult.missingDeps.join(', ')}` }) : null,
         ].filter(Boolean),
       }) : null,
       hasItems ? jsxs('div', {
@@ -980,7 +910,7 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
         children: [
           jsx('input', {
             style: C.searchInput,
-            placeholder: t.searchPlaceholder,
+            placeholder: t('searchPlaceholder'),
             value: searchQuery,
             onChange: (e: any) => setSearchQuery(e.target.value),
           }),
@@ -990,28 +920,28 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
               jsx('button', {
                 style: { ...C.tabBtn, ...(tab === 'all' ? C.tabBtnActive : {}) },
                 onClick: () => setTab('all'),
-                children: `${t.tabAll} (${state.npm.length + state.linked.length})`,
+                children: `${t('tabAll')} (${state.npm.length + state.linked.length})`,
               }),
               jsx('button', {
                 style: { ...C.tabBtn, ...(tab === 'outdated' ? C.tabBtnActive : {}) },
                 onClick: () => setTab('outdated'),
-                children: `${t.tabOutdated} (${outdatedNpm.length + linkUpdatableCount})`,
+                children: `${t('tabOutdated')} (${outdatedNpm.length + linkUpdatableCount})`,
               }),
               jsx('button', {
                 style: { ...C.tabBtn, ...(tab === 'npm' ? C.tabBtnActive : {}) },
                 onClick: () => setTab('npm'),
-                children: `${t.tabNpm} (${state.npm.length})`,
+                children: `${t('tabNpm')} (${state.npm.length})`,
               }),
               jsx('button', {
                 style: { ...C.tabBtn, ...(tab === 'link' ? C.tabBtnActive : {}) },
                 onClick: () => setTab('link'),
-                children: `${t.tabLink} (${state.linked.length})`,
+                children: `${t('tabLink')} (${state.linked.length})`,
               }),
               totalIgnoredCount > 0
                 ? jsx('button', {
                     style: { ...C.tabBtn, ...(tab === 'ignored' ? C.tabBtnActive : {}) },
                     onClick: () => setTab('ignored'),
-                    children: `${t.tabIgnored} (${totalIgnoredCount})`,
+                    children: `${t('tabIgnored')} (${totalIgnoredCount})`,
                   })
                 : null,
             ].filter(Boolean),
@@ -1024,7 +954,7 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
       filteredNpm.length
         ? jsxs('div', {
             children: [
-              jsx('div', { style: C.section, children: `${t.npmSection} (${filteredNpm.length})` }),
+              jsx('div', { style: C.section, children: `${t('npmSection')} (${filteredNpm.length})` }),
               jsx('ul', { style: C.grid, children: npmItems }),
             ],
           })
@@ -1032,16 +962,16 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
       filteredLinked.length
         ? jsxs('div', {
             children: [
-              jsx('div', { style: C.section, children: `${t.linkSection} (${filteredLinked.length})` }),
+              jsx('div', { style: C.section, children: `${t('linkSection')} (${filteredLinked.length})` }),
               jsx('ul', { style: C.grid, children: linkItems }),
             ],
           })
         : null,
       hasItems && !hasFilteredItems
-        ? jsx('p', { style: { ...C.stats, margin: '20px 0', textAlign: 'center' }, children: t.noMatch }, 'no-match')
+        ? jsx('p', { style: { ...C.stats, margin: '20px 0', textAlign: 'center' }, children: t('noMatch') }, 'no-match')
         : null,
       !hasItems && !state.errors.length
-        ? jsx('p', { style: C.stats, children: t.emptyList }, 'empty')
+        ? jsx('p', { style: C.stats, children: t('emptyList') }, 'empty')
         : null,
       msg ? jsx('div', { style: { ...C.msg, ...(msgErr ? C.msgErr : {}) }, children: msg }) : null,
       // 3.9: 更新历史（折叠）
@@ -1051,7 +981,7 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
           jsx('button', {
             style: { ...C.btnGhost, padding: '5px 12px', fontSize: 12, cursor: 'pointer', borderRadius: 8 },
             onClick: () => setShowHistory((v) => !v),
-            children: showHistory ? t.hideHistory : `${t.historyTitle}（${history.length}）`,
+            children: showHistory ? t('hideHistory') : `${t('historyTitle')}（${history.length}）`,
           }),
           showHistory && history.length
             ? jsx('ul', {
@@ -1071,9 +1001,9 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
                       h.ok && h.from && h.from !== 'rollback' && h.from !== h.to
                         ? jsx('button', {
                             style: { background: 'transparent', border: '1px solid var(--dsw-alias-border-l2, rgba(128,128,128,0.3))', color: 'var(--dsw-alias-state-business-primary, #2563eb)', borderRadius: 4, fontSize: 11, cursor: 'pointer', padding: '1px 6px' },
-                            title: t.rollbackTo(h.from),
+                            title: `${t('rollbackTo')} ${h.from}`,
                             onClick: () => runRollback(h.name, h.from, h.kind),
-                            children: t.rollbackTo(h.from),
+                            children: `↩ ${h.from}`,
                           }, 'rb-' + h.name)
                         : null,
                     ].filter(Boolean),
@@ -1082,13 +1012,13 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
               }, 'history')
             : null,
           !history.length && showHistory
-            ? jsx('p', { style: { ...C.stats, marginTop: 6 }, children: t.noHistory }, 'hist-empty')
+            ? jsx('p', { style: { ...C.stats, marginTop: 6 }, children: t('noHistory') }, 'hist-empty')
             : null,
         ],
       }),
       jsx('p', {
         style: C.note,
-        children: t.footerNote,
+        children: t('footerNote'),
       }),
       // 3.8: toast 容器
       toasts.length
@@ -1111,25 +1041,29 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
 }
 
 export function apply(ctx: ClientContext): void {
-  ctx.effect(() => ctx.slots.inject('settings.section', () =>
+  ctx.effect(() => ctx.locale.register(NS, { en: dicts.en, zh: dicts.zh }), 'dsh-plugin-updater: locale')
+  const t = ctx.locale.bind(NS)
+  const injected = () => ({ t })
+
+  ctx.slots.inject('settings.section', () =>
     ctx.slots.register({
       name: 'settings.section',
       id: 'dsh-plugin-updater-section',
       order: 60,
-      label: () => (getDshLocale() === 'zh' ? '插件更新' : 'Plugin Updates'),
+      label: () => t('nav'),
+      locale: NS,
+      inject: injected,
     }, PluginUpdaterSection),
-  ), 'dsh-plugin-updater: settings section')
+  )
 
   // 3.2：站内通知铃铛（纯 DOM 独立挂载，参考 whale-girl 模式）
-  ctx.effect(() => mountBell(), 'dsh-plugin-updater: notification bell')
+  ctx.effect(() => mountBell(t), 'dsh-plugin-updater: notification bell')
 }
 
 /** 站内通知铃铛：智能按需浮现 + 清空 + 位置避让 + 点击跳转设置。 */
-function mountBell(): () => void {
+function mountBell(t: (key: string) => string): () => void {
   const root = document.getElementById('dshpu-bell-root')
   if (root) return () => {} // 已挂载
-
-  const getT = () => translations[getDshLocale()] || translations.en
 
   const container = document.createElement('div')
   container.id = 'dshpu-bell-root'
@@ -1139,7 +1073,7 @@ function mountBell(): () => void {
   const bell = document.createElement('button')
   bell.style.cssText = 'position:relative;width:40px;height:40px;border-radius:50%;border:1px solid var(--dsw-alias-border-l2, rgba(128,128,128,0.25));background:var(--dsw-alias-bg-layer-2, var(--dsw-alias-bg-module-platform, #111));color:var(--dsw-alias-label-primary, #ddd);cursor:pointer;font-size:17px;box-shadow:0 3px 12px rgba(0,0,0,.28);display:flex;align-items:center;justify-content:center;outline:none;'
   bell.textContent = '🔔'
-  bell.title = getT().notifTitle
+  bell.title = t('notifTitle')
 
   const badge = document.createElement('span')
   badge.style.cssText = 'position:absolute;top:-3px;right:-3px;min-width:16px;height:16px;border-radius:8px;background:#e74c3c;color:#fff;font-size:10px;font-weight:bold;line-height:16px;text-align:center;padding:0 4px;display:none;box-shadow:0 0 0 2px var(--dsw-alias-bg-layer-2,#111);'
@@ -1151,20 +1085,20 @@ function mountBell(): () => void {
   panelHeader.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-bottom:1px solid var(--dsw-alias-border-l2, rgba(128,128,128,0.2));font-weight:600;color:var(--dsw-alias-label-primary, #ddd);background:var(--dsw-alias-bg-module-platform, rgba(128,128,128,0.03));'
 
   const titleSpan = document.createElement('span')
-  titleSpan.textContent = getT().notifTitle
+  titleSpan.textContent = t('notifTitle')
 
   const actionsGroup = document.createElement('div')
   actionsGroup.style.cssText = 'display:flex;gap:6px;align-items:center;'
 
   const readAll = document.createElement('button')
   readAll.style.cssText = 'background:transparent;border:1px solid var(--dsw-alias-border-l2, rgba(128,128,128,0.25));color:var(--dsw-alias-label-secondary, #ccc);border-radius:6px;padding:2px 8px;font-size:11px;cursor:pointer;'
-  readAll.textContent = getT().notifMarkAllRead
-  readAll.title = getT().notifMarkAllRead
+  readAll.textContent = t('notifMarkAllRead')
+  readAll.title = t('notifMarkAllRead')
 
   const clearAll = document.createElement('button')
   clearAll.style.cssText = 'background:transparent;border:1px solid var(--dsw-alias-border-l2, rgba(128,128,128,0.25));color:var(--dsw-alias-label-secondary, #ccc);border-radius:6px;padding:2px 8px;font-size:11px;cursor:pointer;'
-  clearAll.textContent = getT().notifClearAll
-  clearAll.title = getT().notifClearAll
+  clearAll.textContent = t('notifClearAll')
+  clearAll.title = t('notifClearAll')
 
   const closeBtn = document.createElement('button')
   closeBtn.style.cssText = 'background:transparent;border:none;color:var(--dsw-alias-label-tertiary, #888);font-size:13px;cursor:pointer;padding:0 2px;line-height:1;'
@@ -1188,7 +1122,6 @@ function mountBell(): () => void {
   document.body.appendChild(container)
 
   const openSettings = () => {
-    // 尝试打开 DSH 设置并在面板中切换到「插件更新 / Plugin Updates」
     const navCells = Array.from(document.querySelectorAll<HTMLElement>('button[class*="navCell"], div[class*="navCell"]'))
     const targetCell = navCells.find((c) => c.textContent?.includes('插件更新') || c.textContent?.includes('Plugin Updates'))
     if (targetCell) {
@@ -1219,7 +1152,7 @@ function mountBell(): () => void {
     list.innerHTML = ''
     const e = document.createElement('div')
     e.style.cssText = 'padding:20px 10px;color:var(--dsw-alias-label-secondary, #888);text-align:center;font-size:12px;'
-    e.textContent = getT().notifEmpty
+    e.textContent = t('notifEmpty')
     list.appendChild(e)
   }
 
@@ -1232,7 +1165,6 @@ function mountBell(): () => void {
         const unread = state.unread ?? 0
         const notifs = Array.isArray(state.notifications) ? state.notifications : []
 
-        // 核心优化：未读 > 0 时才主动浮现，否则若弹窗未开启则自动隐藏
         if (unread > 0) {
           container.style.display = 'block'
           badge.style.display = 'block'
@@ -1259,10 +1191,10 @@ function mountBell(): () => void {
           const content = document.createElement('div')
           content.style.cssText = 'flex: 1; min-width: 0;'
 
-          const t = document.createElement('div')
-          t.style.cssText = 'font-weight:600;color:var(--dsw-alias-label-primary,#ddd);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;'
-          t.textContent = n.title
-          content.appendChild(t)
+          const tEl = document.createElement('div')
+          tEl.style.cssText = 'font-weight:600;color:var(--dsw-alias-label-primary,#ddd);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;'
+          tEl.textContent = n.title
+          content.appendChild(tEl)
 
           if (n.body) {
             const b = document.createElement('div')
@@ -1273,12 +1205,11 @@ function mountBell(): () => void {
 
           const arrow = document.createElement('span')
           arrow.style.cssText = 'color:var(--dsw-alias-state-business-primary,#2563eb);font-size:12px;margin-left:8px;white-space:nowrap;'
-          arrow.textContent = '去更新 ›'
+          arrow.textContent = '›'
 
           row.appendChild(content)
           row.appendChild(arrow)
 
-          // 点击通知行直接打开设置页
           row.addEventListener('click', () => {
             panel.style.display = 'none'
             if (badge.style.display === 'none') container.style.display = 'none'
@@ -1288,7 +1219,7 @@ function mountBell(): () => void {
           list.appendChild(row)
         }
       })
-      .catch(() => { /* 静默：宿主未就绪 */ })
+      .catch(() => {})
   }
 
   readAll.addEventListener('click', (e) => {
@@ -1322,7 +1253,6 @@ function mountBell(): () => void {
     if (!open) refresh()
   })
 
-  // 点击面板外部自动关闭
   document.addEventListener('click', (e) => {
     if (!container.contains(e.target as Node)) {
       if (panel.style.display === 'flex') {
