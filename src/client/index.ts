@@ -79,6 +79,19 @@ const C: Record<string, any> = {
     borderColor: 'var(--dsw-alias-state-business-primary, var(--dsw-alias-brand-primary, #2563eb))',
     color: '#fff', fontWeight: 600,
   },
+  changelogBtn: {
+    background: 'transparent',
+    border: '1px solid var(--dsw-alias-border-l2, rgba(128,128,128,0.25))',
+    color: 'var(--dsw-alias-label-secondary, #888)',
+    borderRadius: 6, fontSize: 11, cursor: 'pointer', padding: '2px 6px',
+    whiteSpace: 'nowrap', transition: 'all .15s',
+  },
+  changelogBox: {
+    marginTop: 8, padding: '8px 10px',
+    background: 'var(--dsw-alias-bg-layer-1, rgba(0,0,0,0.12))',
+    border: '1px solid var(--dsw-alias-border-l2, rgba(128,128,128,0.2))',
+    borderRadius: 6,
+  },
 }
 
 interface NpmItem {
@@ -259,6 +272,57 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
 
   const [searchQuery, setSearchQuery] = useState('')
   const [tab, setTab] = useState<'all' | 'outdated' | 'npm' | 'link' | 'ignored'>('all')
+  const [activeChangelog, setActiveChangelog] = useState<{ name: string; loading: boolean; data?: any; error?: string } | null>(null)
+
+  const toggleChangelog = (name: string, version: string) => {
+    if (activeChangelog?.name === name) {
+      setActiveChangelog(null)
+      return
+    }
+    setActiveChangelog({ name, loading: true })
+    fetch(API + '/changelog?name=' + encodeURIComponent(name) + '&version=' + encodeURIComponent(version))
+      .then((r) => r.json())
+      .then((d: any) => {
+        if (d?.ok && d?.value) {
+          setActiveChangelog({ name, loading: false, data: d.value })
+        } else {
+          setActiveChangelog({ name, loading: false, error: d?.error || '无法获取更新日志' })
+        }
+      })
+      .catch((e: any) => {
+        setActiveChangelog({ name, loading: false, error: String(e?.message ?? e) })
+      })
+  }
+
+  const renderChangelog = (name: string) => {
+    if (activeChangelog?.name !== name) return null
+    if (activeChangelog.loading) {
+      return jsx('div', {
+        style: C.changelogBox,
+        children: jsxs('div', {
+          style: { display: 'flex', alignItems: 'center', gap: 6, color: 'var(--dsw-alias-label-secondary, #888)', fontSize: 12 },
+          children: [jsx('span', { style: C.spinner }), '正在拉取更新日志…'],
+        }),
+      })
+    }
+    const data = activeChangelog.data
+    return jsxs('div', {
+      style: C.changelogBox,
+      children: [
+        jsxs('div', {
+          style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, borderBottom: '1px solid var(--dsw-alias-border-l2, rgba(128,128,128,0.15))', paddingBottom: 4 },
+          children: [
+            jsx('span', { style: { fontWeight: 600, color: 'var(--dsw-alias-label-primary, #ddd)', fontSize: 12.5 }, children: data?.title || '📝 更新说明' }),
+            data?.htmlUrl ? jsx('a', { href: data.htmlUrl, target: '_blank', rel: 'noopener noreferrer', style: { fontSize: 11.5, color: 'var(--dsw-alias-state-business-primary, #2563eb)', textDecoration: 'none' }, children: '在 GitHub 查看 ↗' }) : null,
+          ].filter(Boolean),
+        }),
+        jsx('div', {
+          style: { fontSize: 12, color: 'var(--dsw-alias-label-secondary, #aaa)', whiteSpace: 'pre-wrap', maxHeight: 180, overflowY: 'auto', lineHeight: 1.5 },
+          children: data?.body || activeChangelog.error || '无更新说明',
+        }),
+      ],
+    })
+  }
 
   const query = searchQuery.trim().toLowerCase()
   const matchQuery = (item: { name: string; description?: string }) => {
@@ -331,6 +395,15 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
         verNode.push(jsx('span', { style: C.arrow, children: '→' }, 'arr'))
         verNode.push(jsx('span', { style: { ...C.ver, color: '#d98b0f' }, children: n.latest }, 'latest'))
         verNode.push(jsx('button', {
+          style: { ...C.changelogBtn, ...(activeChangelog?.name === n.name ? { borderColor: 'var(--dsw-alias-state-business-primary, #2563eb)', color: 'var(--dsw-alias-state-business-primary, #2563eb)' } : {}) },
+          title: '查看新版本更新说明',
+          onClick: (e: any) => {
+            e.stopPropagation()
+            toggleChangelog(n.name, n.latest!)
+          },
+          children: activeChangelog?.name === n.name ? '收起说明' : '说明',
+        }, 'clog-' + n.name))
+        verNode.push(jsx('button', {
           style: { ...C.updateBtn, ...(isUpdating || busy ? C.btnDisabled : {}) },
           disabled: isUpdating || busy,
           onClick: (e: any) => {
@@ -359,7 +432,7 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
 
     const header = jsxs('div', { style: C.itemHeader, children: [nameNode, statusNode, ignoreNode].filter(Boolean) })
     const desc = n.description ? jsx('div', { style: C.desc, title: n.description, children: n.description }) : null
-    return jsxs('li', { style, children: [header, desc].filter(Boolean) }, 'npm-' + n.name)
+    return jsxs('li', { style, children: [header, desc, renderChangelog(n.name)].filter(Boolean) }, 'npm-' + n.name)
   })
 
   // link 插件列表
@@ -411,6 +484,15 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
           verSpan,
           jsx('span', { style: C.arrow, children: '→' }, 'arr'),
           jsx('span', { style: { ...C.st, ...C.stOut }, children: `GitHub ${l.ghTag ?? l.ghLatest}` }, 'ghbehind'),
+          jsx('button', {
+            style: { ...C.changelogBtn, ...(activeChangelog?.name === l.name ? { borderColor: 'var(--dsw-alias-state-business-primary, #2563eb)', color: 'var(--dsw-alias-state-business-primary, #2563eb)' } : {}) },
+            title: '查看新版本更新说明',
+            onClick: (e: any) => {
+              e.stopPropagation()
+              toggleChangelog(l.name, l.ghTag || l.ghLatest || '')
+            },
+            children: activeChangelog?.name === l.name ? '收起说明' : '说明',
+          }, 'clog-' + l.name),
         ].filter(Boolean),
       })
       buttonNode = jsx('button', {
@@ -471,7 +553,7 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
     const desc = l.description ? jsx('div', { style: C.desc, title: l.description, children: l.description }) : null
     return jsxs('li', {
       style: { ...C.item, ...(isUpdatingNode ? C.itemUpdating : {}) },
-      children: [header, desc].filter(Boolean),
+      children: [header, desc, renderChangelog(l.name)].filter(Boolean),
     }, 'link-' + l.name)
   })
 

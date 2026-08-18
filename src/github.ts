@@ -135,3 +135,78 @@ export async function githubLatest(
   tarball = tarball ?? `https://codeload.github.com/${repo}/tar.gz/refs/tags/${encodeURIComponent(bestTag)}`
   return { version: best, repo, tag: bestTag, tarball, source: bestKind }
 }
+
+export interface ChangelogInfo {
+  repo?: string
+  version?: string
+  title?: string
+  body?: string
+  htmlUrl?: string
+  publishedAt?: string
+  error?: string
+}
+
+/** 拉取指定版本或最新版本的 GitHub Release Notes。 */
+export async function fetchChangelog(
+  repoOrNpm: string,
+  targetVersion: string,
+  token = '',
+  timeoutMs = 8000,
+): Promise<ChangelogInfo> {
+  let repo = parseGhRepo(repoOrNpm)
+  if (!repo && repoOrNpm.includes('/') && !repoOrNpm.startsWith('@')) {
+    const parts = repoOrNpm.split('/')
+    if (parts.length === 2) repo = repoOrNpm
+  }
+
+  // 若不是 owner/repo，查 npm registry 取 repository
+  if (!repo) {
+    try {
+      const regUrl = `https://registry.npmjs.org/${encodeURIComponent(repoOrNpm).replace('%40', '@')}`
+      const controller = new AbortController()
+      const timer = setTimeout(() => controller.abort(), timeoutMs)
+      const res = await fetch(regUrl, { signal: controller.signal, headers: { accept: 'application/json' } })
+      clearTimeout(timer)
+      if (res.ok) {
+        const data = (await res.json()) as any
+        repo = parseGhRepo(data?.repository)
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  if (!repo) {
+    return { error: '未找到关联的 GitHub 仓库或更新日志源' }
+  }
+
+  try {
+    const releases = await githubJson(`https://api.github.com/repos/${repo}/releases?per_page=10`, token, timeoutMs)
+    if (Array.isArray(releases) && releases.length > 0) {
+      const matched = releases.find((r: any) => {
+        const tag = String(r.tag_name || '').replace(/^[vV]/, '')
+        return tag === targetVersion || String(r.tag_name || '') === targetVersion
+      }) || releases[0]
+
+      if (matched) {
+        return {
+          repo,
+          version: matched.tag_name,
+          title: matched.name || matched.tag_name,
+          body: matched.body || '（发布者未填写详细更新说明）',
+          htmlUrl: matched.html_url,
+          publishedAt: matched.published_at,
+        }
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  return {
+    repo,
+    version: targetVersion,
+    body: '未能拉取到详细 Release Notes，建议前往 GitHub 仓库查看。',
+    htmlUrl: `https://github.com/${repo}`,
+  }
+}

@@ -33,7 +33,7 @@ import {
   backupNpmState, backupGitState, runNpmUpdateWithRollback, runGitUpdateWithRollback, runGithubDownloadUpdate, healLinkJunctions,
 } from './updater.js'
 import { hotReloadPlugin } from './reload.js'
-import { githubLatest, parseGhRepo } from './github.js'
+import { githubLatest, parseGhRepo, fetchChangelog } from './github.js'
 import { isNewer } from './semver.js'
 import { Config as UpdaterConfigSchema, type Config as UpdaterConfigType } from './config.js'
 import { PluginStore } from './store.js'
@@ -431,6 +431,15 @@ export function apply(ctx: Context, config: Config): void {
       if (req.method === 'POST' && pathname === '/check') {
         const value = await checkUpdates(ctx, config, true)
         value && writeJson(res, 200, { ok: true, value })
+        return
+      }
+      // GET /changelog
+      if (req.method === 'GET' && pathname === '/changelog') {
+        const name = url.searchParams.get('name') || ''
+        const version = url.searchParams.get('version') || ''
+        const githubToken = config.githubToken || process.env.GITHUB_TOKEN || ''
+        const info = await fetchChangelog(name, version, githubToken, config.fetchTimeoutMs)
+        writeJson(res, 200, { ok: true, value: info })
         return
       }
       // GET /notifications
