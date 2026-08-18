@@ -711,7 +711,7 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
     })
     const desc = l.description ? jsx('div', { style: C.desc, title: l.description, children: l.description }) : null
     return jsxs('li', {
-      style: { ...C.item, ...(isUpdatingNode ? C.itemUpdating : {}) },
+      style: { ...C.item, ...(isUpdating ? C.itemUpdating : {}) },
       children: [header, desc, renderChangelog(l.name)].filter(Boolean),
     }, 'link-' + l.name)
   })
