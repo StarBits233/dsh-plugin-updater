@@ -80,6 +80,7 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
   const [checking, setChecking] = useState(true)
   const [updating, setUpdating] = useState<string[]>([]) // 正在更新的包名集合
   const [busy, setBusy] = useState(false) // 全部更新进行中
+  const [main, setMain] = useState<any>(null) // 主程序状态（3.6）
 
   const refresh = useCallback((force = false) => {
     setChecking(true)
@@ -106,6 +107,11 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
         setMsgErr(true)
       })
       .finally(() => setChecking(false))
+    // 3.6：顺带拉主程序状态
+    fetch(API + '/state', { headers: { 'content-type': 'application/json' } })
+      .then((r) => r.json())
+      .then((d: any) => { if (d?.ok) setMain(d.value?.main ?? null) })
+      .catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -254,11 +260,54 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
   const linkUpdatableCount = state.linked.filter((l) => l.gitBehind || (!!(l as any).ghLatest && !l.homepage)).length
   const stats = `检查时间: ${new Date(state.checkedAt ?? Date.now()).toLocaleString()}${state.cached ? '（缓存）' : ''} · ${state.npm.length} 个 npm 插件 · ${outdatedNpm.length} 可更新 · ${state.linked.length} 个 link（${linkUpdatableCount} 可更新）`
 
+  // 主程序状态条（3.6）
+  const mainNode = (() => {
+    if (!main) return null
+    const updateable = !!main.updateable
+    const outdated = !!main.outdated
+    const label = outdated
+      ? updateable
+        ? `主程序可更新（${main.current} → ${main.latest}）`
+        : `主程序可更新（${main.current} → ${main.latest}，需在配置启用）`
+      : `主程序已是最新（${main.current ?? '?'}）`
+    const style: any = {
+      display: 'flex', alignItems: 'center', gap: 8, margin: '8px 0', padding: '8px 10px',
+      border: `1px solid ${outdated ? 'var(--theme-accent,#4f8cff)' : 'var(--theme-border,#333)'}`,
+      borderRadius: 6, background: 'var(--theme-input-bg,#111)', fontSize: 12,
+    }
+    const btn = outdated && updateable
+      ? jsx('button', {
+          style: { ...C.updateBtn },
+          onClick: (e: any) => {
+            e.stopPropagation()
+            if (!window.confirm('确定更新 DSH 主程序？更新后需重启 DSH。')) return
+            fetch(API + '/update-main', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirm: true }) })
+              .then((r) => r.json())
+              .then((d: any) => {
+                setMsg(d?.value?.output ?? JSON.stringify(d ?? {}))
+                setMsgErr(!(d?.ok ?? d?.value?.ok))
+                setTimeout(() => refresh(true), 1500)
+              })
+              .catch((err: any) => { setMsg('更新主程序失败: ' + err, ); setMsgErr(true) })
+          },
+          children: '更新主程序',
+        }, 'mainbtn')
+      : null
+    return jsxs('div', {
+      style,
+      children: [
+        jsx('span', { style: { color: outdated ? 'var(--theme-accent,#4f8cff)' : 'var(--theme-text-secondary,#888)' }, children: label }),
+        btn,
+      ],
+    }, 'main-status')
+  })()
+
   return jsxs('div', {
     style: C.page,
     children: [
       jsx('h3', { style: C.h3, children: '插件更新检查（dsh-plugin-updater）' }),
       jsx('p', { style: C.stats, children: stats }),
+      mainNode,
       jsxs('div', {
         style: C.row,
         children: [

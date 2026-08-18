@@ -24,7 +24,7 @@ import type { Context } from 'cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 
 import {
-  readRegistryUrl, checkNpmUpdates, installedVersion as npmInstalledVersion, mapLimit,
+  readRegistryUrl, checkNpmUpdates, installedVersion as npmInstalledVersion, mapLimit, fetchLatest,
 } from './registry.js'
 import {
   gitRemoteHomepage, gitBehindStatus, tryGitUpdate, resolveLinkTarget,
@@ -211,6 +211,45 @@ async function scheduledCheck(ctx: Context, config: Config): Promise<void> {
   }
 }
 
+/** 主程序（@deepseek-ai/dsh）状态检测（3.6）：读运行实例版本 + npm latest。 */
+async function checkMainUpdate(config: Config): Promise<{ current: string | null; latest: string | null; outdated: boolean; updateable: boolean }> {
+  const mainPkgDir = join(dirname(resolveDshBin() ?? ''), '..', '..')
+  let current: string | null = null
+  try {
+    const pkg = JSON.parse(readFileSync(join(mainPkgDir, 'package.json'), 'utf8')) as { version?: string }
+    current = typeof pkg.version === 'string' ? pkg.version : null
+  } catch {
+    // runtime 可能不在标准位置，从 resolveDshBin 目录找上一级
+    try {
+      const bin = resolveDshBin()
+      if (bin) {
+        const p = JSON.parse(readFileSync(join(dirname(bin), '..', 'package.json'), 'utf8')) as { version?: string }
+        current = typeof p.version === 'string' ? p.version : null
+      }
+    } catch { /* ignore */ }
+  }
+  const registry = readRegistryUrl(profileDir(config.profile), dshHome())
+  const latest = await fetchLatest(registry, '@deepseek-ai/dsh', 8000)
+  const outdated = !!current && !!latest && isNewer(latest, current)
+  return { current, latest, outdated, updateable: config.allowCoreUpdates }
+}
+
+/** 主程序更新（3.6）：npm 全局/运行时更新。仅 allowCoreUpdates=true 时可用。不自动重启宿主。 */
+async function runMainUpdate(ctx: Context, config: Config): Promise<{ ok: boolean; output: string }> {
+  if (!config.allowCoreUpdates) {
+    return { ok: false, output: '已禁 用主程序更新（allowCoreUpdates=false）' }
+  }
+  // 用 npm 更新 @deepseek-ai/dsh 到 latest（全局）。不自动重启，提示用户重启。
+  const r = await runCmd('npm', ['install', '-g', '@deepseek-ai/dsh@latest'], process.cwd(), 300000)
+  const output = (r.stdout + r.stderr).trim()
+  if (r.code === 0) {
+    st(ctx).addHistory({ name: '@deepseek-ai/dsh', from: null, to: 'latest', ok: true, kind: 'main', output: '已更新主程序，请重启 DSH 生效' })
+    return { ok: true, output: output.slice(-500) || '主程序已更新，请重启 DSH 生效' }
+  }
+  st(ctx).addHistory({ name: '@deepseek-ai/dsh', from: null, to: null, ok: false, kind: 'main', output })
+  return { ok: false, output: output.slice(-500) || '主程序更新失败' }
+}
+
 /** 执行更新：npm 走 dsh plugin add（带回滚）；link 走 git（带回滚 + dirty 保护）。 */
 async function runUpdate(ctx: Context, config: Config, packages: { name: string; latest: string }[]): Promise<UpdateResultValue> {
   const dir = profileDir(config.profile)
@@ -327,6 +366,7 @@ export function apply(ctx: Context, config: Config): void {
       // GET /state
       if (req.method === 'GET' && pathname === '/state') {
         const cur = CACHE.get(config.profile)
+        const main = await checkMainUpdate(config)
         writeJson(res, 200, {
           ok: true,
           value: {
@@ -336,9 +376,22 @@ export function apply(ctx: Context, config: Config): void {
             ignored: store.snapshot().ignored,
             history: store.snapshot().history.slice(0, 20),
             lastCheckAt: store.snapshot().lastCheckAt,
+            main,
             config: { checkIntervalMs: config.checkIntervalMs, notifyNewUpdates: config.notifyNewUpdates, allowCoreUpdates: config.allowCoreUpdates },
           },
         })
+        return
+      }
+      // POST /update-main（3.6，仅 allowCoreUpdates）
+      if (req.method === 'POST' && pathname === '/update-main') {
+        let body: any = {}
+        try { body = JSON.parse(await readBody(req)) } catch { /* empty */ }
+        if (body?.confirm !== true) {
+          writeJson(res, 400, { ok: false, error: '需要 { confirm: true }' })
+          return
+        }
+        const r = await runMainUpdate(ctx, config)
+        writeJson(res, 200, { ok: r.ok, value: r })
         return
       }
       // POST /check
