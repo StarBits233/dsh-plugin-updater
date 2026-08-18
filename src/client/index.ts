@@ -798,19 +798,24 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
             onClick: () => refresh(true),
             children: checking ? '检查中…' : '🔄 重新检查',
           }),
-          allUpdatableList.length > 0
-            ? jsx('button', {
-                style: { ...C.btn, ...(busy ? C.btnDisabled : {}) },
-                disabled: busy,
-                onClick: () => {
-                  const toUpdate = selectedPkgs.size > 0
-                    ? allUpdatableList.filter((p) => selectedPkgs.has(p.name))
-                    : allUpdatableList
-                  runUpdate(toUpdate, `更新所选 (${toUpdate.length})`)
-                },
-                children: busy ? '更新中…' : selectedPkgs.size > 0 ? `更新所选 (${selectedPkgs.size})` : `全部更新 (${allUpdatableList.length})`,
-              })
-            : null,
+          jsx('button', {
+            style: {
+              ...C.btn,
+              ...(allUpdatableList.length === 0 || busy ? C.btnDisabled : {}),
+            },
+            disabled: allUpdatableList.length === 0 || busy,
+            onClick: () => {
+              const toUpdate = selectedPkgs.size > 0
+                ? allUpdatableList.filter((p) => selectedPkgs.has(p.name))
+                : allUpdatableList
+              runUpdate(toUpdate, selectedPkgs.size > 0 ? `更新所选 (${toUpdate.length})` : '全部')
+            },
+            children: busy
+              ? '更新中…'
+              : selectedPkgs.size > 0
+              ? `更新所选（${selectedPkgs.size}）`
+              : `全部更新（${allUpdatableList.length}）`,
+          }),
           allUpdatableList.length > 0
             ? jsx('button', {
                 style: { ...C.btnGhost, padding: '6px 12px', fontSize: 12.5, cursor: 'pointer', borderRadius: 8 },
