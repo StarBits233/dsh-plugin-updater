@@ -6,7 +6,7 @@
 
 <br/>
 
-![Version](https://img.shields.io/badge/version-0.1.0-blue.svg?style=flat-square)
+![Version](https://img.shields.io/badge/version-0.2.0-blue.svg?style=flat-square)
 ![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-Plugin-orange.svg?style=flat-square)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178C6.svg?style=flat-square&logo=typescript&logoColor=white)
 ![License](https://img.shields.io/badge/license-BSD--3--Clause-green.svg?style=flat-square)
