@@ -114,7 +114,7 @@ export async function tryGitUpdate(
   const resetR = await run('git', ['reset', '--hard', `origin/${b}`], root, 60000)
   const logR = await run('git', ['log', '-1', '--oneline'], root, 15000)
   const output = resetR.code === 0
-    ? `已同步 ${root} @ ${b} — ${logR.stdout.trim()}${stashed ? '（本地改动已 stash）' : ''}（本地 link 已更新，重启 DSH 生效）`
+    ? `已同步 ${root} @ ${b} — ${logR.stdout.trim()}${stashed ? '（本地未提交改动已自动暂存，可通过 git stash pop 恢复）' : ''}（本地 link 已更新，重启 DSH 生效）`
     : `git reset 失败: ${(resetR.stderr || resetR.stdout).slice(-300)}`
   return { ok: resetR.code === 0, output, stashed }
 }
