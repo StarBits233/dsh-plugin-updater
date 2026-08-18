@@ -88,13 +88,18 @@ function resolveDshBin(): string | null {
 /** 执行 dsh CLI：`node <dshBin> <args>`（跨平台）。 */
 async function runDsh(args: string[], cwd: string, timeoutMs = 300000): Promise<{ code: number; stdout: string; stderr: string }> {
   const bin = resolveDshBin()
-  if (!bin) return runCmd('dsh', args, cwd, timeoutMs)
+  if (!bin) {
+    const dshCmd = process.platform === 'win32' ? 'dsh.cmd' : 'dsh'
+    return runCmd(dshCmd, args, cwd, timeoutMs)
+  }
   return runCmd(process.execPath, [bin, ...args], cwd, timeoutMs)
 }
 
 function runCmd(cmd: string, args: string[], cwd: string, timeoutMs = 120000): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolvePromise) => {
-    execFile(cmd, args, { cwd, timeout: timeoutMs, windowsHide: true, maxBuffer: 16 * 1024 * 1024 }, (err, stdout, stderr) => {
+    const isWin = process.platform === 'win32'
+    const finalCmd = isWin && !cmd.includes('.') && (cmd === 'npm' || cmd === 'pnpm' || cmd === 'dsh') ? `${cmd}.cmd` : cmd
+    execFile(finalCmd, args, { cwd, timeout: timeoutMs, windowsHide: true, shell: isWin, maxBuffer: 16 * 1024 * 1024 }, (err, stdout, stderr) => {
       resolvePromise({ code: err ? (err as any).code ?? 1 : 0, stdout: String(stdout), stderr: String(stderr) })
     })
   })
