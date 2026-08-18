@@ -2,7 +2,7 @@
 
 DeepSeek Harness (DSH) 插件更新检查与一键更新套件（支持 NPM 插件、本地 Link 插件、GitHub Release 下载、一键版本回滚、热重载、更新日志预览、环境体检自愈与智能站内通知）。
 
-> 仓库：`https://github.com/XinXie-WRJ/dsh-plugin-updater`
+> 仓库：`https://github.com/StarBits233/dsh-plugin-updater`
 
 ## ✨ 核心特性
 
