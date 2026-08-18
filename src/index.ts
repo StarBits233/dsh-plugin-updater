@@ -24,12 +24,12 @@ import type { Context } from 'cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 
 import {
-  readRegistryUrl, checkNpmUpdates, installedVersion as npmInstalledVersion, mapLimit, fetchLatest,
+  readRegistryUrl, checkNpmUpdates, mapLimit, fetchLatest,
 } from './registry.js'
 import {
   gitRemoteHomepage, gitBehindStatus, tryGitUpdate, resolveLinkTarget,
 } from './git.js'
-import { backupNpmState, backupGitState, runGitUpdateWithRollback, runGithubDownloadUpdate } from './updater.js'
+import { backupNpmState, backupGitState, runNpmUpdateWithRollback, runGitUpdateWithRollback, runGithubDownloadUpdate } from './updater.js'
 import { hotReloadPlugin } from './reload.js'
 import { githubLatest, parseGhRepo } from './github.js'
 import { isNewer } from './semver.js'
@@ -58,11 +58,15 @@ function profileDir(profile: string): string {
 const CACHE_TTL_MS = 10 * 60 * 1000
 const CACHE = new Map<string, { at: number; value: UpdateResult & { notifiedAt?: string } }>()
 
-/** 解析 dsh CLI 的真实 Node 入口。 */
+/** 解析 dsh CLI 的真实 Node 入口。优先当前正在运行的 DSH 宿主（node 同目录 node_modules），
+ *  其次 profile / 全局 npm / 插件旁路。 */
 let dshBinCache: string | null | undefined
 function resolveDshBin(): string | null {
   if (dshBinCache !== undefined) return dshBinCache
   const candidates = [
+    // 当前正在运行的 DSH 宿主：node 与 @deepseek-ai/dsh 位于同一 node_modules（准确，避免更新到旁路全局副本）
+    join(dirname(process.execPath), 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js'),
+    join(process.env.LOCALAPPDATA ?? '', 'DeepSeek Harness', 'runtime', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js'),
     join(profileDir('web'), 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js'),
     join(homedir(), 'AppData', 'Roaming', 'npm', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js'),
     join(dirname(dirname(dirname(fileURLToPath(import.meta.url)))), 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js'),
@@ -123,7 +127,7 @@ function readGhRepo(target: string): string | undefined {
 }
 
 /** 检查更新：直接依赖并发查 registry /latest + 本地 node_modules 版本比对。 */
-async function computeUpdates(profile: string, isIgnored?: (name: string) => boolean, fetchTimeoutMs = 8000): Promise<UpdateResult> {
+async function computeUpdates(profile: string, isIgnored?: (name: string) => boolean, fetchTimeoutMs = 8000, githubToken = ''): Promise<UpdateResult> {
   const dir = profileDir(profile)
   const deps = readDependencies(profile)
   const linked: LinkItem[] = []
@@ -156,7 +160,7 @@ async function computeUpdates(profile: string, isIgnored?: (name: string) => boo
       // 无本地 git 但有 GitHub 仓库 → 查 GitHub releases（3.5）
       if (item.ghRepo && !item.homepage) {
         const repo = item.ghRepo
-        const gh = await githubLatest(repo, null, fetchTimeoutMs, '')
+        const gh = await githubLatest(repo, null, fetchTimeoutMs, githubToken)
         if (gh) return { ...item, ghLatest: gh.version, ghTag: gh.tag }
       }
       return item
@@ -181,7 +185,8 @@ async function checkUpdates(ctx: Context, config: Config, force = false): Promis
   if (!force && hit && now - hit.at < CACHE_TTL_MS) {
     return { ...hit.value, cached: true }
   }
-  const value = await computeUpdates(config.profile, (name) => st(ctx).isIgnored(name), config.fetchTimeoutMs)
+  const githubToken = config.githubToken || process.env.GITHUB_TOKEN || ''
+  const value = await computeUpdates(config.profile, (name) => st(ctx).isIgnored(name), config.fetchTimeoutMs, githubToken)
   CACHE.set(config.profile, { at: now, value })
 
   // P0-3.2：发现"新更新"→ 站内通知（去重）
@@ -293,7 +298,7 @@ async function updateOne(
     }
     const ghRepo = readGhRepo(target)
     if (ghRepo) {
-      const gh = await githubLatest(ghRepo, null, 8000, config.githubToken || process.env.GITHUB_TOKEN || '')
+      const gh = await githubLatest(ghRepo, null, config.fetchTimeoutMs, config.githubToken || process.env.GITHUB_TOKEN || '')
       if (gh) {
         const dl = await runGithubDownloadUpdate(runCmd, target, { repo: ghRepo, version: gh.version, tarball: gh.tarball, tag: gh.tag }, p.name)
         store.addHistory({ name: p.name, from: null, to: gh.version, ok: dl.ok, kind: 'git', output: dl.output })
@@ -304,36 +309,23 @@ async function updateOne(
     store.addHistory({ name: p.name, from: null, to: null, ok: plain.ok, kind: 'git', output: plain.output })
     return { ok: plain.ok, output: plain.output }
   }
-  // npm 更新带备份/回滚
+  // npm 更新（updater.ts 单一路径：执行 → 验证 → 失败回滚）
   const npmBackup = backupNpmState(dir, p.name, p.latest)
-  const r = await runDsh(['plugin', '--profile', config.profile, 'add', `${p.name}@${p.latest}`], dir, 300000)
-  const raw = (r.stdout + r.stderr).trim()
-  const summary = raw.split(/\r?\n/).filter((l) => !/^\s*Progress:/i.test(l)).slice(-6).join('\n')
-  const output = summary || raw.slice(-800)
-  const ok = r.code === 0
-  const actual = npmInstalledVersion(dir, p.name)
-  let finalOk = ok
-  let finalOutput = output
-
-  // 验证 + 失败回滚
-  if (ok && actual !== null && isNewer(p.latest, actual)) {
-    finalOk = false
-    if (npmBackup.oldVersion) {
-      await runDsh(['plugin', '--profile', config.profile, 'add', `${p.name}@${npmBackup.oldVersion}`], dir, 300000)
-      finalOutput = `更新后版本(${actual})未达目标(${p.latest})，已回滚到 ${npmBackup.oldVersion}`
-    } else {
-      finalOutput = `更新后版本(${actual})未达目标(${p.latest})且无法回滚`
-    }
-  } else if (!ok && npmBackup.oldVersion && npmBackup.oldVersion !== p.latest) {
-    await runDsh(['plugin', '--profile', config.profile, 'add', `${p.name}@${npmBackup.oldVersion}`], dir, 300000)
-    finalOutput = `${output}\n执行失败，已回滚到 ${npmBackup.oldVersion}`
-  } else if (ok) {
+  const r = await runNpmUpdateWithRollback(
+    (args) => runDsh(args, dir, 300000),
+    config.profile,
+    dir,
+    npmBackup,
+  )
+  let finalOk = r.ok
+  let finalOutput = r.output + (r.rolledBack ? '（已回滚）' : '')
+  if (r.ok && !r.rolledBack) {
     // 3.4: 热重启（更新成功后重建 fiber，免手动重启）
     const pkgDir = join(dir, 'node_modules', ...p.name.split('/'))
     const hrel = await hotReloadPlugin(ctx, p.name, pkgDir)
-    finalOutput = summary ? `${summary}\n${hrel.output}` : hrel.output
+    finalOutput = finalOutput ? `${finalOutput}\n${hrel.output}` : hrel.output
   }
-  store.addHistory({ name: p.name, from: npmBackup.oldVersion, to: p.latest, ok: finalOk, kind: 'npm', output: finalOutput })
+  store.addHistory({ name: p.name, from: npmBackup.oldVersion, to: r.ok ? p.latest : null, ok: finalOk, kind: 'npm', output: finalOutput })
   return { ok: finalOk, output: finalOutput }
 }
 

@@ -69,14 +69,17 @@ export async function backupGitState(run: Run, dir: string, name: string): Promi
 
 /**
  * 执行 npm 更新（dsh plugin add）并验证，失败时回滚到旧版本。
+ * @param runDsh 已注入 profile 与超时的 dsh 执行函数（args → 子进程结果）。
+ * @param profile 目标 DSH profile 名。
  * @returns {ok, output, rolledBack} rolledBack=true 表示已回滚到旧版本。
  */
 export async function runNpmUpdateWithRollback(
   runDsh: (args: string[]) => Promise<{ code: number; stdout: string; stderr: string }>,
+  profile: string,
   dir: string,
   backup: NpmBackup,
 ): Promise<{ ok: boolean; output: string; rolledBack: boolean }> {
-  const r = await runDsh(['plugin', '--profile', /* profile 由调用方拼进 args? */ 'web', 'add', `${backup.name}@${backup.targetVersion}`])
+  const r = await runDsh(['plugin', '--profile', profile, 'add', `${backup.name}@${backup.targetVersion}`])
   const raw = (r.stdout + r.stderr).trim()
   const summary = raw.split(/\r?\n/).filter((l) => !/^\s*Progress:/i.test(l)).slice(-6).join('\n')
   const ok = r.code === 0
@@ -87,12 +90,12 @@ export async function runNpmUpdateWithRollback(
     const semver = await import('./semver.js')
     if (actual !== null && semver.compareVersions(actual, backup.targetVersion) < 0) {
       // 版本没升上去，视为失败
-      return { ok: false, output: `更新后版本(${actual})未达到目标(${backup.targetVersion})，执行回滚`, rolledBack: await rollbackNpm(runDsh, backup) }
+      return { ok: false, output: `更新后版本(${actual})未达到目标(${backup.targetVersion})，执行回滚`, rolledBack: await rollbackNpm(runDsh, profile, backup) }
     }
   }
 
-  if (!ok && backup.oldVersion) {
-    const rb = await rollbackNpm(runDsh, backup)
+  if (!ok && backup.oldVersion && backup.oldVersion !== backup.targetVersion) {
+    const rb = await rollbackNpm(runDsh, profile, backup)
     return { ok: false, output: `${summary || r.stderr}\n已回滚到 ${backup.oldVersion}${rb ? '' : '（回滚失败，请手动处理）'}`, rolledBack: rb }
   }
   if (!ok) {
@@ -101,13 +104,14 @@ export async function runNpmUpdateWithRollback(
   return { ok: true, output: summary || raw.slice(-800), rolledBack: false }
 }
 
-/** 回滚 npm 到旧版本。 */
+/** 回滚 npm 到旧版本（仅当记录到旧版本时）。 */
 export async function rollbackNpm(
   runDsh: (args: string[]) => Promise<{ code: number; stdout: string; stderr: string }>,
+  profile: string,
   backup: NpmBackup,
 ): Promise<boolean> {
   if (!backup.oldVersion) return false
-  const r = await runDsh(['plugin', '--profile', 'web', 'add', `${backup.name}@${backup.oldVersion}`])
+  const r = await runDsh(['plugin', '--profile', profile, 'add', `${backup.name}@${backup.oldVersion}`])
   return r.code === 0
 }
 

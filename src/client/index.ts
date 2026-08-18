@@ -74,6 +74,12 @@ interface LinkItem {
   homepage?: string
   gitBehind?: boolean
   gitBranch?: string
+  /** 3.5：package.json repository 推导的 GitHub owner/repo */
+  ghRepo?: string | null
+  /** 3.5：GitHub 是否有新版本 */
+  ghLatest?: string | null
+  /** 3.5：对应 GitHub tag */
+  ghTag?: string | null
 }
 
 interface UpdaterState {
@@ -295,8 +301,8 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
     // 状态区：无 git/GH → 本地目录；有 git → gitBehind 显示；无 git 有 GH → ghLatest 显示
     let statusNode: any
     let buttonNode: any = null
-    const ghRepo = (l as any).ghRepo
-    const isGhUpdatable = !!l.homepage === false && !!ghRepo && !!l.ghLatest
+    const ghRepo = l.ghRepo
+    const isGhUpdatable = !l.homepage && !!ghRepo && !!l.ghLatest
     const isUpdatingNode = isUpdating && buttonNode
     if (!l.homepage && !ghRepo) {
       statusNode = jsx('span', { style: { ...C.st, ...C.stLink }, children: '本地目录（无远程）' }, 'local')
@@ -344,7 +350,7 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
     }, 'link-' + l.name)
   })
 
-  const linkUpdatableCount = state.linked.filter((l) => l.gitBehind || (!!(l as any).ghLatest && !l.homepage)).length
+  const linkUpdatableCount = state.linked.filter((l) => l.gitBehind || (!!l.ghLatest && !l.homepage)).length
   const stats = `检查时间: ${new Date(state.checkedAt ?? Date.now()).toLocaleString()}${state.cached ? '（缓存）' : ''} · ${state.npm.length} 个 npm 插件 · ${outdatedNpm.length} 可更新 · ${state.linked.length} 个 link（${linkUpdatableCount} 可更新）`
 
   // 主程序状态条（3.6）

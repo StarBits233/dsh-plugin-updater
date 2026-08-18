@@ -30,7 +30,7 @@ test('backupNpmState: 生成带旧版本/目标版本的备份对象', async () 
 
 test('rollbackNpm: 无旧版本时返回 false（不可回滚）', async () => {
   const runDsh = async () => ({ code: 0, stdout: '', stderr: '' })
-  const rb = await updater.rollbackNpm(runDsh, { kind: 'npm', name: 'x', oldVersion: null, targetVersion: '1.0.0', at: '' })
+  const rb = await updater.rollbackNpm(runDsh, 'web', { kind: 'npm', name: 'x', oldVersion: null, targetVersion: '1.0.0', at: '' })
   assert.equal(rb, false)
 })
 

@@ -23,7 +23,9 @@
   },
   "scripts": {
     "build": "bash scripts/build.sh",
+    "build:win": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts\\build.ps1",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test scripts/*.test.mjs",
     "build:client": "tsdown"
   },
   "exports": {
