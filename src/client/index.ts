@@ -59,6 +59,20 @@ const C: Record<string, any> = {
   msg: { marginTop: 10, padding: '8px 10px', borderRadius: 6, background: 'var(--theme-input-bg,#111)', border: '1px solid var(--theme-border,#333)', whiteSpace: 'pre-wrap', maxHeight: 200, overflow: 'auto', fontSize: 11 },
   msgErr: { borderColor: '#d33' },
   note: { color: 'var(--theme-text-secondary,#888)', fontSize: 11, marginTop: 8 },
+  searchInput: {
+    background: 'var(--theme-input-bg,#111)', border: '1px solid var(--theme-border,#333)',
+    color: 'var(--theme-text,#ddd)', borderRadius: 6, padding: '5px 10px', fontSize: 12,
+    outline: 'none', flex: 1, minWidth: 160,
+  },
+  tabBtn: {
+    background: 'transparent', border: '1px solid var(--theme-border,#333)',
+    color: 'var(--theme-text-secondary,#888)', borderRadius: 16, padding: '3px 10px',
+    fontSize: 11, cursor: 'pointer', whiteSpace: 'nowrap',
+  },
+  tabBtnActive: {
+    background: 'var(--theme-accent,#4f8cff)', borderColor: 'var(--theme-accent,#4f8cff)',
+    color: '#fff', fontWeight: 600,
+  },
 }
 
 interface NpmItem {
@@ -232,10 +246,33 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
   }
 
   const outdatedNpm = state.npm.filter((n) => n.outdated)
+  const linkUpdatableCount = state.linked.filter((l) => l.gitBehind || (!!l.ghLatest && !l.homepage)).length
   const updatingOne = (name: string) => updating.includes(name)
 
+  const [searchQuery, setSearchQuery] = useState('')
+  const [tab, setTab] = useState<'all' | 'outdated' | 'npm' | 'link'>('all')
+
+  const query = searchQuery.trim().toLowerCase()
+  const matchQuery = (item: { name: string; description?: string }) => {
+    if (!query) return true
+    return item.name.toLowerCase().includes(query) || (item.description ? item.description.toLowerCase().includes(query) : false)
+  }
+
+  const filteredNpm = state.npm.filter((n) => {
+    if (tab === 'link') return false
+    if (tab === 'outdated' && !n.outdated) return false
+    return matchQuery(n)
+  })
+
+  const filteredLinked = state.linked.filter((l) => {
+    if (tab === 'npm') return false
+    const isUpdatable = l.gitBehind || (!!l.ghLatest && !l.homepage)
+    if (tab === 'outdated' && !isUpdatable) return false
+    return matchQuery(l)
+  })
+
   // npm 插件列表（卡片）
-  const npmItems: any[] = state.npm.map((n) => {
+  const npmItems: any[] = filteredNpm.map((n) => {
     const isUpdating = updatingOne(n.name)
     const style: any = { ...C.item, ...(isUpdating ? C.itemUpdating : {}) }
     const nameNode = n.homepage
@@ -292,7 +329,7 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
   })
 
   // link 插件列表
-  const linkItems: any[] = state.linked.map((l) => {
+  const linkItems: any[] = filteredLinked.map((l) => {
     const isUpdating = updatingOne(l.name)
     const nameNode = l.homepage
       ? jsx('a', {
@@ -363,7 +400,6 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
     }, 'link-' + l.name)
   })
 
-  const linkUpdatableCount = state.linked.filter((l) => l.gitBehind || (!!l.ghLatest && !l.homepage)).length
   const stats = `检查时间: ${new Date(state.checkedAt ?? Date.now()).toLocaleString()}${state.cached ? '（缓存）' : ''} · ${state.npm.length} 个 npm 插件 · ${outdatedNpm.length} 可更新 · ${state.linked.length} 个 link（${linkUpdatableCount} 可更新）`
 
   // 主程序状态条（3.6）
@@ -408,6 +444,9 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
     }, 'main-status')
   })()
 
+  const hasItems = state.npm.length > 0 || state.linked.length > 0
+  const hasFilteredItems = filteredNpm.length > 0 || filteredLinked.length > 0
+
   return jsxs('div', {
     style: C.page,
     children: [
@@ -432,26 +471,65 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
           }),
         ],
       }),
+      hasItems ? jsxs('div', {
+        style: { display: 'flex', gap: 8, alignItems: 'center', margin: '12px 0 8px', flexWrap: 'wrap' },
+        children: [
+          jsx('input', {
+            style: C.searchInput,
+            placeholder: '搜索插件名称或功能简介...',
+            value: searchQuery,
+            onChange: (e: any) => setSearchQuery(e.target.value),
+          }),
+          jsxs('div', {
+            style: { display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' },
+            children: [
+              jsx('button', {
+                style: { ...C.tabBtn, ...(tab === 'all' ? C.tabBtnActive : {}) },
+                onClick: () => setTab('all'),
+                children: `全部 (${state.npm.length + state.linked.length})`,
+              }),
+              jsx('button', {
+                style: { ...C.tabBtn, ...(tab === 'outdated' ? C.tabBtnActive : {}) },
+                onClick: () => setTab('outdated'),
+                children: `可更新 (${outdatedNpm.length + linkUpdatableCount})`,
+              }),
+              jsx('button', {
+                style: { ...C.tabBtn, ...(tab === 'npm' ? C.tabBtnActive : {}) },
+                onClick: () => setTab('npm'),
+                children: `NPM (${state.npm.length})`,
+              }),
+              jsx('button', {
+                style: { ...C.tabBtn, ...(tab === 'link' ? C.tabBtnActive : {}) },
+                onClick: () => setTab('link'),
+                children: `Link (${state.linked.length})`,
+              }),
+            ],
+          }),
+        ],
+      }) : null,
       state.errors.length
         ? jsx('div', { style: { ...C.msg, ...C.msgErr }, children: `⚠️ ${state.errors.join('；')}` }, 'err')
         : null,
-      state.npm.length
+      filteredNpm.length
         ? jsxs('div', {
             children: [
-              jsx('div', { style: C.section, children: 'npm 插件' }),
+              jsx('div', { style: C.section, children: `npm 插件 (${filteredNpm.length})` }),
               jsx('ul', { style: C.grid, children: npmItems }),
             ],
           })
         : null,
-      state.linked.length
+      filteredLinked.length
         ? jsxs('div', {
             children: [
-              jsx('div', { style: C.section, children: '本地安装（link）' }),
+              jsx('div', { style: C.section, children: `本地安装（link） (${filteredLinked.length})` }),
               jsx('ul', { style: C.grid, children: linkItems }),
             ],
           })
         : null,
-      !state.npm.length && !state.linked.length && !state.errors.length
+      hasItems && !hasFilteredItems
+        ? jsx('p', { style: { ...C.stats, margin: '20px 0', textAlign: 'center' }, children: '未找到符合条件的插件' }, 'no-match')
+        : null,
+      !hasItems && !state.errors.length
         ? jsx('p', { style: C.stats, children: '暂无插件信息' }, 'empty')
         : null,
       msg ? jsx('div', { style: { ...C.msg, ...(msgErr ? C.msgErr : {}) }, children: msg }) : null,
