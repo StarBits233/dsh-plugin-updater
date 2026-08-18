@@ -211,12 +211,25 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
           children: l.name,
         })
       : jsx('span', { style: C.name, children: l.name })
-    // 状态区：无 git → 本地目录；有 git → 按 gitBehind 显示可更新/最新
+    // 状态区：无 git/GH → 本地目录；有 git → gitBehind 显示；无 git 有 GH → ghLatest 显示
     let statusNode: any
     let buttonNode: any = null
-    if (!l.homepage) {
+    const ghRepo = (l as any).ghRepo
+    const isGhUpdatable = !!l.homepage === false && !!ghRepo && !!l.ghLatest
+    if (!l.homepage && !ghRepo) {
       statusNode = jsx('span', { style: { ...C.st, ...C.stLink }, children: '本地目录（无远程）' }, 'local')
-    } else {
+    } else if (isGhUpdatable) {
+      statusNode = jsx('span', { style: { ...C.st, ...C.stOut }, children: `可更新（GitHub ${l.ghTag ?? l.ghLatest}）` }, 'ghbehind')
+      buttonNode = jsx('button', {
+        style: { ...C.updateBtn, ...((isUpdating || busy) ? C.btnDisabled : {}) },
+        disabled: isUpdating || busy,
+        onClick: (e: any) => {
+          e.stopPropagation()
+          runUpdate([{ name: l.name, latest: l.ghLatest! }], `更新 ${l.name}`)
+        },
+        children: isUpdating ? '更新中…' : 'git 更新',
+      }, 'ghbtn')
+    } else if (l.homepage) {
       statusNode = l.gitBehind
         ? jsx('span', { style: { ...C.st, ...C.stOut }, children: `可更新（${l.gitBranch ?? 'git'}）` }, 'behind')
         : jsx('span', { style: { ...C.st, ...C.stOk }, children: '已是最新' }, 'ok')
@@ -229,6 +242,8 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
         },
         children: isUpdating ? '更新中…' : 'git 更新',
       }, 'gitbtn')
+    } else {
+      statusNode = jsx('span', { style: { ...C.st, ...C.stLink }, children: '本地目录' }, 'local2')
     }
     return jsxs('li', {
       style: { ...C.item },
@@ -236,8 +251,8 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
     }, 'link-' + l.name)
   })
 
-  const gitUpdatableCount = state.linked.filter((l) => l.gitBehind).length
-  const stats = `检查时间: ${new Date(state.checkedAt ?? Date.now()).toLocaleString()}${state.cached ? '（缓存）' : ''} · ${state.npm.length} 个 npm 插件 · ${outdatedNpm.length} 可更新 · ${state.linked.length} 个 link（${gitUpdatableCount} 个 git 可更新）`
+  const linkUpdatableCount = state.linked.filter((l) => l.gitBehind || (!!(l as any).ghLatest && !l.homepage)).length
+  const stats = `检查时间: ${new Date(state.checkedAt ?? Date.now()).toLocaleString()}${state.cached ? '（缓存）' : ''} · ${state.npm.length} 个 npm 插件 · ${outdatedNpm.length} 可更新 · ${state.linked.length} 个 link（${linkUpdatableCount} 可更新）`
 
   return jsxs('div', {
     style: C.page,

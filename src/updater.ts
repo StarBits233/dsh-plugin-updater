@@ -7,8 +7,10 @@
  * - npm：备份 = 记录当前安装版本；回滚 = `dsh plugin add name@旧版本`。
  * - git：备份 = 记录当前 HEAD commit；回滚 = `git reset --hard 旧commit`。
  */
-import { existsSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, readFileSync, mkdirSync, mkdtempSync, writeFileSync, readdirSync, statSync, copyFileSync, rmSync, createWriteStream, renameSync } from 'node:fs'
+import { join, dirname } from 'node:path'
+import { tmpdir } from 'node:os'
+import { pipeline } from 'node:stream/promises'
 import { installedVersion } from './registry.js'
 
 export interface NpmBackup {
@@ -135,4 +137,146 @@ export async function runGitUpdateWithRollback(
     ? `更新失败：${update.output}\n已回滚到 ${beforeCommit.slice(0, 8)}（${logR.stdout.trim()}）`
     : `更新失败且回滚失败：${update.output}`
   return { ok: false, output, rolledBack: resetR.code === 0 }
+}
+
+// ─── 3.5 GitHub 下载更新管线 ───────────────────────────────
+
+function mkdtempSafe(base: string, prefix: string): string {
+  return mkdtempSync(join(base, prefix))
+}
+
+async function renameDir(from: string, to: string): Promise<void> {
+  try {
+    mkdirSync(dirname(to), { recursive: true })
+    rmSync(to, { recursive: true, force: true })
+    // 改父目录正则下人用 renameSync（跨设备回退 copy）
+    try {
+      renameSync(from, to)
+    } catch {
+      await copyDirAsync(from, to)
+      rmSync(from, { recursive: true, force: true })
+    }
+  } catch {
+    throw new Error('renameDir failed')
+  }
+  if (!existsSync(to)) throw new Error('renameDir: destination missing')
+}
+
+async function copyDirAsync(from: string, to: string): Promise<void> {
+  if (!existsSync(from)) return
+  mkdirSync(to, { recursive: true })
+  for (const entry of readdirSync(from)) {
+    const src = join(from, entry)
+    const dst = join(to, entry)
+    const st = statSync(src)
+    if (st.isDirectory()) await copyDirAsync(src, dst)
+    else {
+      mkdirSync(dirname(dst), { recursive: true })
+      copyFileSync(src, dst)
+    }
+  }
+}
+
+function copyDir(from: string, to: string): void {
+  mkdirSync(to, { recursive: true })
+  for (const entry of readdirSync(from)) {
+    const src = join(from, entry)
+    const dst = join(to, entry)
+    const st = statSync(src)
+    if (st.isDirectory()) copyDir(src, dst)
+    else {
+      mkdirSync(dirname(dst), { recursive: true })
+      copyFileSync(src, dst)
+    }
+  }
+}
+
+/** 下载文件到磁盘（流式，全阶段超时）。 */
+async function downloadFile(url: string, dest: string, timeoutMs: number): Promise<boolean> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const res = await fetch(url, { signal: controller.signal, redirect: 'follow' })
+    if (!res.ok || !res.body) return false
+    await pipeline(res.body as any, createWriteStream(dest))
+    return true
+  } catch {
+    return false
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+export interface GithubDownloadResult {
+  ok: boolean
+  output: string
+  rolledBack: boolean
+}
+
+/**
+ * GitHub tarball 下载更新（3.5）：codeload 下载 → 系统 tar 解压 → 校验包名 → 备份 → 覆盖 → 复核。
+ * 用于"无本地 git 但有 GitHub repository"的 link 插件。
+ * 依赖：系统 tar（Windows 10+ 自带 bsdtar，支持 .tar.gz）。
+ */
+export async function runGithubDownloadUpdate(
+  run: Run,
+  target: string,
+  gh: { repo: string; version: string; tarball: string; tag?: string },
+  name: string,
+): Promise<GithubDownloadResult> {
+  const stage = mkdtempSafe(tmpdir(), 'dshpu-gh-')
+  try {
+    // 1) 下载
+    const tgz = join(stage, 'pkg.tar.gz')
+    const ok = await downloadFile(gh.tarball, tgz, 120000)
+    if (!ok) return { ok: false, output: `GitHub 下载失败：${gh.tarball}`, rolledBack: false }
+
+    // 2) 解压（系统 tar）
+    const extractDir = join(stage, 'extract')
+    mkdirSync(extractDir, { recursive: true })
+    const tar = await run('tar', ['-xzf', tgz, '-C', extractDir], process.cwd(), 120000)
+    if (tar.code !== 0) return { ok: false, output: `解压失败：${(tar.stderr || tar.stdout).slice(-200)}`, rolledBack: false }
+
+    // 3) 定位包根（通常 <repo>-<tag>/）
+    const entries = readdirSync(extractDir)
+    const pkgRoot = entries.length === 1 && existsSync(join(extractDir, entries[0])) ? join(extractDir, entries[0]) : extractDir
+
+    // 4) 校验 package.json name
+    const pkgJsonPath = join(pkgRoot, 'package.json')
+    if (!existsSync(pkgJsonPath)) return { ok: false, output: 'GitHub 包缺少 package.json', rolledBack: false }
+    let pkg: { name?: unknown } = {}
+    try { pkg = JSON.parse(readFileSync(pkgJsonPath, 'utf8')) } catch { /* 忽略解析失败 */ }
+    if (pkg.name && pkg.name !== name) {
+      return { ok: false, output: `GitHub 包名不匹配：${pkg.name} ≠ ${name}`, rolledBack: false }
+    }
+
+    // 5) 备份旧目录（移动到 stage，非复制）
+    const backupDir = join(stage, 'backup')
+    if (existsSync(target)) {
+      rmSync(backupDir, { recursive: true, force: true })
+      mkdirSync(dirname(target), { recursive: true })
+      try {
+        await renameDir(target, backupDir)
+      } catch {
+        return { ok: false, output: '旧目录备份失败', rolledBack: false }
+      }
+    }
+
+    // 6) 覆盖
+    try {
+      copyDir(pkgRoot, target)
+    } catch (error: any) {
+      rmSync(target, { recursive: true, force: true })
+      try {
+        if (existsSync(backupDir)) await renameDir(backupDir, target)
+      } catch { /* best-effort */ }
+      return { ok: false, output: `覆盖失败：${String(error?.message ?? error)}（已回滚）`, rolledBack: true }
+    }
+
+    return { ok: true, output: `已从 GitHub 更新到 ${gh.version}（${gh.repo}${gh.tag ? ' @' + gh.tag : ''}）`, rolledBack: false }
+  } catch (error: any) {
+    return { ok: false, output: `GitHub 更新异常：${String(error?.message ?? error)}`, rolledBack: false }
+  } finally {
+    rmSync(stage, { recursive: true, force: true })
+  }
 }

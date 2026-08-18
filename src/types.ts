@@ -28,6 +28,8 @@ export interface LinkItem {
   ghRepo?: string | null
   /** 是否有 GitHub 新版本（3.5 用） */
   ghLatest?: string | null
+  /** 对应的 GitHub tag */
+  ghTag?: string | null
 }
 
 /** 过时 npm 条目（旧 /status.outdated[]，保留兼容）。 */

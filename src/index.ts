@@ -29,8 +29,9 @@ import {
 import {
   gitRemoteHomepage, gitBehindStatus, tryGitUpdate, resolveLinkTarget,
 } from './git.js'
-import { backupNpmState, backupGitState, runGitUpdateWithRollback } from './updater.js'
+import { backupNpmState, backupGitState, runGitUpdateWithRollback, runGithubDownloadUpdate } from './updater.js'
 import { hotReloadPlugin } from './reload.js'
+import { githubLatest, parseGhRepo } from './github.js'
 import { isNewer } from './semver.js'
 import { Config as UpdaterConfigSchema, type Config as UpdaterConfigType } from './config.js'
 import { PluginStore } from './store.js'
@@ -110,6 +111,17 @@ function isLinked(spec: string): boolean {
   return /^(?:link|file):|^\.{1,2}(?:[/\\]|$)/.test(spec)
 }
 
+/** 读取 link 目标 package.json 的 repository 字段（推导 GitHub 仓库）。 */
+function readGhRepo(target: string): string | undefined {
+  try {
+    const pkg = JSON.parse(readFileSync(join(target, 'package.json'), 'utf8')) as { repository?: unknown }
+    const repo = parseGhRepo(pkg.repository)
+    return repo ?? undefined
+  } catch {
+    return undefined
+  }
+}
+
 /** 检查更新：直接依赖并发查 registry /latest + 本地 node_modules 版本比对。 */
 async function computeUpdates(profile: string): Promise<UpdateResult> {
   const dir = profileDir(profile)
@@ -119,7 +131,12 @@ async function computeUpdates(profile: string): Promise<UpdateResult> {
   for (const [name, spec] of Object.entries(deps)) {
     if (isLinked(spec)) {
       const target = resolveLinkTarget(dir, spec)
-      linked.push({ name, spec, homepage: target ? gitRemoteHomepage(target) : undefined })
+      linked.push({
+        name,
+        spec,
+        homepage: target ? gitRemoteHomepage(target) : undefined,
+        ghRepo: target ? readGhRepo(target) : undefined,
+      })
     } else if (!/^(?:git|github|gitlab|bitbucket|hg):/.test(spec)) {
       npmNames.push(name)
     }
@@ -127,10 +144,21 @@ async function computeUpdates(profile: string): Promise<UpdateResult> {
 
   if (linked.length) {
     const statuses = await mapLimit(linked, 4, async (item) => {
-      if (!item.homepage) return item
-      const target = resolveLinkTarget(dir, item.spec)
-      const st = target ? await gitBehindStatus(runCmd, target) : null
-      return st ? { ...item, gitBehind: st.behind, gitBranch: st.branch } : item
+      // 本地 git → 检测落后
+      if (item.homepage) {
+        const target = resolveLinkTarget(dir, item.spec)
+        const st = target ? await gitBehindStatus(runCmd, target) : null
+        if (st) {
+          return { ...item, gitBehind: st.behind, gitBranch: st.branch, ghLatest: null }
+        }
+      }
+      // 无本地 git 但有 GitHub 仓库 → 查 GitHub releases（3.5）
+      if (item.ghRepo && !item.homepage) {
+        const repo = item.ghRepo
+        const gh = await githubLatest(repo, null, 8000, '')
+        if (gh) return { ...item, ghLatest: gh.version, ghTag: gh.tag }
+      }
+      return item
     })
     linked.splice(0, linked.length, ...statuses)
   }
@@ -199,15 +227,26 @@ async function runUpdate(ctx: Context, config: Config, packages: { name: string;
       }
       // 3.3: git 更新带备份/回滚
       const gitBackup = await backupGitState(runCmd, target, p.name)
-      if (!gitBackup) {
-        const plain = await tryGitUpdate(runCmd, target, p, { protectLocal: true })
-        results.push({ ...p, ok: plain.ok, output: plain.output })
-        store.addHistory({ name: p.name, from: null, to: null, ok: plain.ok, kind: 'git', output: plain.output })
+      if (gitBackup) {
+        const upd = await runGitUpdateWithRollback(runCmd, target, gitBackup)
+        results.push({ ...p, ok: upd.ok, output: upd.output + (upd.rolledBack ? '（已回滚）' : '') })
+        store.addHistory({ name: p.name, from: gitBackup.oldCommit.slice(0, 8), to: null, ok: upd.ok, kind: 'git', output: upd.output })
         continue
       }
-      const upd = await runGitUpdateWithRollback(runCmd, target, gitBackup)
-      results.push({ ...p, ok: upd.ok, output: upd.output + (upd.rolledBack ? '（已回滚）' : '') })
-      store.addHistory({ name: p.name, from: gitBackup.oldCommit.slice(0, 8), to: null, ok: upd.ok, kind: 'git', output: upd.output })
+      // 3.5: 无本地 git 但有 GitHub 仓库 → 下载更新
+      const ghRepo = readGhRepo(target)
+      if (ghRepo) {
+        const gh = await githubLatest(ghRepo, null, 8000, config.githubToken || process.env.GITHUB_TOKEN || '')
+        if (gh) {
+          const dl = await runGithubDownloadUpdate(runCmd, target, { repo: ghRepo, version: gh.version, tarball: gh.tarball, tag: gh.tag }, p.name)
+          results.push({ ...p, ok: dl.ok, output: dl.output })
+          store.addHistory({ name: p.name, from: null, to: gh.version, ok: dl.ok, kind: 'git', output: dl.output })
+          continue
+        }
+      }
+      const plain = await tryGitUpdate(runCmd, target, p, { protectLocal: true })
+      results.push({ ...p, ok: plain.ok, output: plain.output })
+      store.addHistory({ name: p.name, from: null, to: null, ok: plain.ok, kind: 'git', output: plain.output })
       continue
     }
     // 3.3: npm 更新带备份/回滚
