@@ -12,6 +12,7 @@
  */
 import { jsx, jsxs } from 'react/jsx-runtime'
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { translations, type Locale } from './i18n.js'
 
 type ClientContext = {
   slots: any
@@ -129,6 +130,23 @@ interface UpdaterState {
 }
 
 function PluginUpdaterSection(_props: { close?: () => void }): any {
+  const [locale, setLocale] = useState<Locale>(() => {
+    try {
+      const saved = localStorage.getItem('dshpu_locale') as Locale
+      if (saved === 'zh' || saved === 'en') return saved
+      return typeof navigator !== 'undefined' && navigator.language?.startsWith('zh') ? 'zh' : 'en'
+    } catch {
+      return 'zh'
+    }
+  })
+
+  const changeLocale = (newLoc: Locale) => {
+    setLocale(newLoc)
+    try { localStorage.setItem('dshpu_locale', newLoc) } catch { /* empty */ }
+  }
+
+  const t = translations[locale] || translations.zh
+
   const [state, setState] = useState<UpdaterState>({ npm: [], linked: [], errors: [] })
   const [msg, setMsg] = useState('')
   const [msgErr, setMsgErr] = useState(false)
@@ -227,7 +245,7 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
     setBusy(true)
     const names = pkgs.map((p) => p.name)
     setUpdating(names)
-    setMsg(`${label} ${pkgs.length} 个插件（每个可能耗时数十秒）…`)
+    setMsg(`${label} ${pkgs.length} (${locale === 'zh' ? '每个可能耗时数十秒' : 'may take a few seconds each'})…`)
     setMsgErr(false)
     fetch(API + '/update', {
       method: 'POST',
@@ -245,20 +263,19 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
         const okCount = results.filter((r: any) => r.ok).length
         const failCount = results.length - okCount
         const lines = results.map((r: any) => `${r.ok ? '✅' : '❌'} ${r.name} → ${r.latest}${r.ok ? '' : '：' + r.output}`)
-        setMsg(`更新完成：${okCount} 成功 / ${failCount} 失败\n\n${lines.join('\n')}\n\n⚠️ 请重启 DSH（托盘 → 重启服务）使新版本生效！`)
+        setMsg(`${locale === 'zh' ? '更新完成' : 'Update Complete'}: ${okCount} ${locale === 'zh' ? '成功' : 'succeeded'} / ${failCount} ${locale === 'zh' ? '失败' : 'failed'}\n\n${lines.join('\n')}`)
         setMsgErr(failCount > 0)
-        // 3.8: toast
         showToast(failCount > 0
-          ? `更新完成：${okCount} 成功 / ${failCount} 失败`
-          : `已更新 ${okCount} 个插件（热重启已执行${results.some((r: any) => r.output?.includes('热重启')) ? '，免手动重启' : '，请重启 DSH'}）`,
+          ? `${locale === 'zh' ? '更新完成' : 'Update Complete'}: ${okCount} ${locale === 'zh' ? '成功' : 'ok'} / ${failCount} ${locale === 'zh' ? '失败' : 'failed'}`
+          : `${locale === 'zh' ? '已更新' : 'Updated'} ${okCount} ${locale === 'zh' ? '个插件' : 'plugins'}`,
           failCount > 0 ? 'err' : 'ok')
         if (okCount > 0) setNeedRestart(true)
         setTimeout(() => refresh(true), 1500)
       })
       .catch((e: any) => {
-        setMsg('更新请求失败: ' + e)
+        setMsg('Error: ' + e)
         setMsgErr(true)
-        showToast('更新请求失败: ' + e, 'err')
+        showToast('Error: ' + e, 'err')
       })
       .finally(() => {
         setBusy(false)
@@ -274,25 +291,25 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
     fetch(API + '/hot-reload', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({}) })
       .then((r) => r.json())
       .then((d: any) => {
-        showToast(d?.output || '插件热重载完成', 'ok')
+        showToast(d?.output || t.hotReloadDone, 'ok')
       })
-      .catch((e: any) => showToast('热重载失败: ' + e, 'err'))
+      .catch((e: any) => showToast(t.hotReloadFailed + e, 'err'))
       .finally(() => setReloading(false))
   }
 
   const copyRestartCommand = () => {
     try {
       navigator.clipboard.writeText('dsh service restart')
-      showToast('已复制重启命令到剪贴板', 'ok')
+      showToast(t.copiedCmd, 'ok')
     } catch {
-      showToast('无法访问剪贴板', 'err')
+      showToast(t.copyFailed, 'err')
     }
   }
 
   const runRollback = (name: string, targetVersion: string, kind: string) => {
-    if (!window.confirm(`确定将 ${name} 回滚降级到版本 ${targetVersion}？`)) return
+    if (!window.confirm(t.rollbackConfirm(name, targetVersion))) return
     setBusy(true)
-    setMsg(`正在将 ${name} 回滚到 ${targetVersion}…`)
+    setMsg(`${name} → ${targetVersion}…`)
     fetch(API + '/rollback', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -301,20 +318,20 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
       .then((r) => r.json())
       .then((d: any) => {
         if (d?.ok) {
-          showToast(`已成功将 ${name} 回滚到 ${targetVersion}`, 'ok')
-          setMsg(`回滚成功：${name} → ${targetVersion}\n${d?.output || ''}`)
+          showToast(`${name} → ${targetVersion}`, 'ok')
+          setMsg(`${name} → ${targetVersion}\n${d?.output || ''}`)
           setMsgErr(false)
           setNeedRestart(true)
           setTimeout(() => refresh(true), 1500)
         } else {
-          showToast(`回滚失败: ${d?.output || d?.error || ''}`, 'err')
-          setMsg(`回滚失败：${d?.output || d?.error || ''}`)
+          showToast(`Rollback failed: ${d?.output || d?.error || ''}`, 'err')
+          setMsg(`Rollback failed: ${d?.output || d?.error || ''}`)
           setMsgErr(true)
         }
       })
       .catch((e: any) => {
-        showToast('回滚请求异常: ' + e, 'err')
-        setMsg('回滚请求异常: ' + e)
+        showToast('Error: ' + e, 'err')
+        setMsg('Error: ' + e)
         setMsgErr(true)
       })
       .finally(() => setBusy(false))
@@ -362,10 +379,10 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
       .then((d: any) => {
         if (d?.ok) {
           setDoctorResult(d.value)
-          showToast(d.value?.healthy ? '环境体检完成：依赖与软链一切正常！' : '环境体检完成：已自愈软链异常', 'ok')
+          showToast(d.value?.healthy ? t.doctorToastPass : t.doctorToastHealed, 'ok')
         }
       })
-      .catch((e: any) => showToast('体检请求失败: ' + e, 'err'))
+      .catch((e: any) => showToast(t.doctorToastFailed + e, 'err'))
       .finally(() => setDoctorRunning(false))
   }
 
@@ -382,11 +399,11 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
       .then((r) => r.json())
       .then((d: any) => {
         if (d?.ok) {
-          showToast('配置已保存生效', 'ok')
+          showToast(t.configSaved, 'ok')
           setShowConfig(false)
         }
       })
-      .catch((e: any) => showToast('保存失败: ' + e, 'err'))
+      .catch((e: any) => showToast(t.configSaveFailed + e, 'err'))
   }
 
   const [searchQuery, setSearchQuery] = useState('')
@@ -405,7 +422,7 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
         if (d?.ok && d?.value) {
           setActiveChangelog({ name, loading: false, data: d.value })
         } else {
-          setActiveChangelog({ name, loading: false, error: d?.error || '无法获取更新日志' })
+          setActiveChangelog({ name, loading: false, error: d?.error || t.fetchNotesFailed })
         }
       })
       .catch((e: any) => {
@@ -420,7 +437,7 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
         style: C.changelogBox,
         children: jsxs('div', {
           style: { display: 'flex', alignItems: 'center', gap: 6, color: 'var(--dsw-alias-label-secondary, #888)', fontSize: 12 },
-          children: [jsx('span', { style: C.spinner }), '正在拉取更新日志…'],
+          children: [jsx('span', { style: C.spinner }), t.fetchingNotes],
         }),
       })
     }
@@ -431,13 +448,13 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
         jsxs('div', {
           style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, borderBottom: '1px solid var(--dsw-alias-border-l2, rgba(128,128,128,0.15))', paddingBottom: 4 },
           children: [
-            jsx('span', { style: { fontWeight: 600, color: 'var(--dsw-alias-label-primary, #ddd)', fontSize: 12.5 }, children: data?.title || '📝 更新说明' }),
-            data?.htmlUrl ? jsx('a', { href: data.htmlUrl, target: '_blank', rel: 'noopener noreferrer', style: { fontSize: 11.5, color: 'var(--dsw-alias-state-business-primary, #2563eb)', textDecoration: 'none' }, children: '在 GitHub 查看 ↗' }) : null,
+            jsx('span', { style: { fontWeight: 600, color: 'var(--dsw-alias-label-primary, #ddd)', fontSize: 12.5 }, children: data?.title || `📝 ${t.notes}` }),
+            data?.htmlUrl ? jsx('a', { href: data.htmlUrl, target: '_blank', rel: 'noopener noreferrer', style: { fontSize: 11.5, color: 'var(--dsw-alias-state-business-primary, #2563eb)', textDecoration: 'none' }, children: t.viewOnGithub }) : null,
           ].filter(Boolean),
         }),
         jsx('div', {
           style: { fontSize: 12, color: 'var(--dsw-alias-label-secondary, #aaa)', whiteSpace: 'pre-wrap', maxHeight: 180, overflowY: 'auto', lineHeight: 1.5 },
-          children: data?.body || activeChangelog.error || '无更新说明',
+          children: data?.body || activeChangelog.error || t.noNotes,
         }),
       ],
     })
@@ -483,29 +500,29 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
             target: '_blank',
             rel: 'noopener noreferrer',
             onClick: (e: any) => e.stopPropagation(),
-            title: '打开 ' + n.homepage,
+            title: n.homepage,
             children: n.name,
           })
         : jsx('span', { style: C.name, children: n.name }),
     })
-    // 状态区：已忽略 / 错误 / 获取失败 / 版本 + 按钮
+    // 状态区
     let statusNode: any
     let ignoreNode: any = null
     if (isIgn) {
-      statusNode = jsx('span', { style: { ...C.st, ...C.stLink }, children: '已忽略' }, 'ign')
+      statusNode = jsx('span', { style: { ...C.st, ...C.stLink }, children: t.ignored }, 'ign')
       ignoreNode = jsx('button', {
         style: { ...C.btnGhost, padding: '3px 8px', fontSize: 11, cursor: 'pointer', borderRadius: 6 },
-        title: '恢复此插件的更新检查与提醒',
+        title: t.unignoreTitle,
         onClick: (e: any) => {
           e.stopPropagation()
           toggleIgnore(n.name)
         },
-        children: '取消忽略',
+        children: t.unignore,
       }, 'unign-' + n.name)
     } else if (n.error) {
       statusNode = jsx('span', { style: { ...C.st, ...C.stErr }, children: n.error }, 'err')
     } else if (n.latest === null) {
-      statusNode = jsx('span', { style: { ...C.st, ...C.stErr }, children: '获取失败' }, 'err')
+      statusNode = jsx('span', { style: { ...C.st, ...C.stErr }, children: t.fetchFailed }, 'err')
     } else {
       const verNode: any[] = [
         jsx('span', { style: C.ver, children: n.current ?? '?' }),
@@ -515,36 +532,35 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
         verNode.push(jsx('span', { style: { ...C.ver, color: '#d98b0f' }, children: n.latest }, 'latest'))
         verNode.push(jsx('button', {
           style: { ...C.changelogBtn, ...(activeChangelog?.name === n.name ? { borderColor: 'var(--dsw-alias-state-business-primary, #2563eb)', color: 'var(--dsw-alias-state-business-primary, #2563eb)' } : {}) },
-          title: '查看新版本更新说明',
+          title: t.notes,
           onClick: (e: any) => {
             e.stopPropagation()
             toggleChangelog(n.name, n.latest!)
           },
-          children: activeChangelog?.name === n.name ? '收起说明' : '说明',
+          children: activeChangelog?.name === n.name ? t.hideNotes : t.notes,
         }, 'clog-' + n.name))
         verNode.push(jsx('button', {
           style: { ...C.updateBtn, ...(isUpdating || busy ? C.btnDisabled : {}) },
           disabled: isUpdating || busy,
           onClick: (e: any) => {
             e.stopPropagation()
-            if (n.latest) runUpdate([{ name: n.name, latest: n.latest }], '更新')
+            if (n.latest) runUpdate([{ name: n.name, latest: n.latest }], t.update)
           },
-          children: isUpdating ? jsx('span', { style: C.spinner }) : '更新',
+          children: isUpdating ? jsx('span', { style: C.spinner }) : t.update,
         }, 'btn'))
-        // 仅在可更新状态下提供低调的忽略入口，且有防误触二次确认
         ignoreNode = jsx('button', {
           style: { background: 'transparent', border: 'none', color: 'var(--dsw-alias-label-tertiary, #888)', fontSize: 11, cursor: 'pointer', padding: '2px 4px', whiteSpace: 'nowrap' },
-          title: '忽略此版本更新提醒',
+          title: t.ignore,
           onClick: (e: any) => {
             e.stopPropagation()
-            if (window.confirm(`确定忽略 ${n.name} 的更新提醒？可在「已忽略」分类中随时恢复。`)) {
+            if (window.confirm(t.ignoreConfirm(n.name))) {
               toggleIgnore(n.name)
             }
           },
-          children: '忽略',
+          children: t.ignore,
         }, 'ignore-' + n.name)
       } else {
-        verNode.push(jsx('span', { style: { ...C.st, ...C.stOk }, children: '最新' }, 'ok'))
+        verNode.push(jsx('span', { style: { ...C.st, ...C.stOk }, children: t.latest }, 'ok'))
       }
       statusNode = jsxs('span', { style: { display: 'flex', alignItems: 'center', gap: 6 }, children: verNode })
     }
@@ -580,12 +596,11 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
             target: '_blank',
             rel: 'noopener noreferrer',
             onClick: (e: any) => e.stopPropagation(),
-            title: '打开 ' + l.homepage,
+            title: l.homepage,
             children: l.name,
           })
         : jsx('span', { style: C.name, children: l.name }),
     })
-    // 状态区：已忽略 / 无 git/GH → 本地目录；有 git → gitBehind 显示；无 git 有 GH → ghLatest 显示
     let statusNode: any
     let buttonNode: any = null
     let ignoreNode: any = null
@@ -593,23 +608,22 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
     const isGhUpdatable = !l.homepage && !isIgn && !!ghRepo && !!l.ghLatest
     const isGitUpdatable = !!l.homepage && !isIgn && !!l.gitBehind
     const isUpdatableLink = isGhUpdatable || isGitUpdatable
-    const isUpdatingNode = isUpdating && buttonNode
 
     const verSpan = l.version ? jsx('span', { style: C.ver, children: l.version }, 'ver-' + l.name) : null
 
     if (isIgn) {
-      statusNode = jsxs('span', { style: { display: 'flex', alignItems: 'center', gap: 6 }, children: [verSpan, jsx('span', { style: { ...C.st, ...C.stLink }, children: '已忽略' })].filter(Boolean) })
+      statusNode = jsxs('span', { style: { display: 'flex', alignItems: 'center', gap: 6 }, children: [verSpan, jsx('span', { style: { ...C.st, ...C.stLink }, children: t.ignored })].filter(Boolean) })
       buttonNode = jsx('button', {
         style: { ...C.btnGhost, padding: '3px 8px', fontSize: 11, cursor: 'pointer', borderRadius: 6 },
-        title: '恢复此插件的更新检查与提醒',
+        title: t.unignoreTitle,
         onClick: (e: any) => {
           e.stopPropagation()
           toggleIgnore(l.name)
         },
-        children: '取消忽略',
+        children: t.unignore,
       }, 'unign-' + l.name)
     } else if (!l.homepage && !ghRepo) {
-      statusNode = jsxs('span', { style: { display: 'flex', alignItems: 'center', gap: 6 }, children: [verSpan, jsx('span', { style: { ...C.st, ...C.stLink }, children: '本地目录（无远程）' })].filter(Boolean) })
+      statusNode = jsxs('span', { style: { display: 'flex', alignItems: 'center', gap: 6 }, children: [verSpan, jsx('span', { style: { ...C.st, ...C.stLink }, children: t.localNoRemote })].filter(Boolean) })
     } else if (isGhUpdatable) {
       statusNode = jsxs('span', {
         style: { display: 'flex', alignItems: 'center', gap: 6 },
@@ -619,12 +633,12 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
           jsx('span', { style: { ...C.st, ...C.stOut }, children: `GitHub ${l.ghTag ?? l.ghLatest}` }, 'ghbehind'),
           jsx('button', {
             style: { ...C.changelogBtn, ...(activeChangelog?.name === l.name ? { borderColor: 'var(--dsw-alias-state-business-primary, #2563eb)', color: 'var(--dsw-alias-state-business-primary, #2563eb)' } : {}) },
-            title: '查看新版本更新说明',
+            title: t.notes,
             onClick: (e: any) => {
               e.stopPropagation()
               toggleChangelog(l.name, l.ghTag || l.ghLatest || '')
             },
-            children: activeChangelog?.name === l.name ? '收起说明' : '说明',
+            children: activeChangelog?.name === l.name ? t.hideNotes : t.notes,
           }, 'clog-' + l.name),
         ].filter(Boolean),
       })
@@ -633,50 +647,50 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
         disabled: isUpdating || busy,
         onClick: (e: any) => {
           e.stopPropagation()
-          runUpdate([{ name: l.name, latest: l.ghLatest! }], `更新 ${l.name}`)
+          runUpdate([{ name: l.name, latest: l.ghLatest! }], `${t.update} ${l.name}`)
         },
-        children: isUpdating ? jsx('span', { style: C.spinner }) : 'git 更新',
+        children: isUpdating ? jsx('span', { style: C.spinner }) : t.gitUpdate,
       } as any, 'ghbtn')
       ignoreNode = jsx('button', {
         style: { background: 'transparent', border: 'none', color: 'var(--dsw-alias-label-tertiary, #888)', fontSize: 11, cursor: 'pointer', padding: '2px 4px', whiteSpace: 'nowrap' },
-        title: '忽略此插件更新提醒',
+        title: t.ignore,
         onClick: (e: any) => {
           e.stopPropagation()
-          if (window.confirm(`确定忽略 ${l.name} 的更新提醒？可在「已忽略」分类中随时恢复。`)) {
+          if (window.confirm(t.ignoreConfirm(l.name))) {
             toggleIgnore(l.name)
           }
         },
-        children: '忽略',
+        children: t.ignore,
       }, 'ignore-' + l.name)
     } else if (l.homepage) {
       const gitStatusBadge = l.gitBehind
-        ? jsx('span', { style: { ...C.st, ...C.stOut }, children: `可更新（${l.gitBranch ?? 'git'}）` }, 'behind')
-        : jsx('span', { style: { ...C.st, ...C.stOk }, children: '已是最新' }, 'ok')
+        ? jsx('span', { style: { ...C.st, ...C.stOut }, children: `${t.updatable} (${l.gitBranch ?? 'git'})` }, 'behind')
+        : jsx('span', { style: { ...C.st, ...C.stOk }, children: t.isLatest }, 'ok')
       statusNode = jsxs('span', { style: { display: 'flex', alignItems: 'center', gap: 6 }, children: [verSpan, gitStatusBadge].filter(Boolean) })
       buttonNode = jsx('button', {
         style: { ...C.updateBtn, ...((isUpdating || busy || !l.gitBehind) ? C.btnDisabled : {}) },
         disabled: isUpdating || busy || !l.gitBehind,
         onClick: (e: any) => {
           e.stopPropagation()
-          runUpdate([{ name: l.name, latest: '' }], `更新 ${l.name}`)
+          runUpdate([{ name: l.name, latest: '' }], `${t.update} ${l.name}`)
         },
-        children: isUpdating ? jsx('span', { style: C.spinner }) : 'git 更新',
+        children: isUpdating ? jsx('span', { style: C.spinner }) : t.gitUpdate,
       } as any, 'gitbtn')
       if (l.gitBehind) {
         ignoreNode = jsx('button', {
           style: { background: 'transparent', border: 'none', color: 'var(--dsw-alias-label-tertiary, #888)', fontSize: 11, cursor: 'pointer', padding: '2px 4px', whiteSpace: 'nowrap' },
-          title: '忽略此插件更新提醒',
+          title: t.ignore,
           onClick: (e: any) => {
             e.stopPropagation()
-            if (window.confirm(`确定忽略 ${l.name} 的更新提醒？可在「已忽略」分类中随时恢复。`)) {
+            if (window.confirm(t.ignoreConfirm(l.name))) {
               toggleIgnore(l.name)
             }
           },
-          children: '忽略',
+          children: t.ignore,
         }, 'ignore-' + l.name)
       }
     } else {
-      statusNode = jsxs('span', { style: { display: 'flex', alignItems: 'center', gap: 6 }, children: [verSpan, jsx('span', { style: { ...C.st, ...C.stLink }, children: '本地目录' })].filter(Boolean) })
+      statusNode = jsxs('span', { style: { display: 'flex', alignItems: 'center', gap: 6 }, children: [verSpan, jsx('span', { style: { ...C.st, ...C.stLink }, children: t.localDir })].filter(Boolean) })
     }
 
     const checkboxNode = isUpdatableLink
@@ -702,7 +716,14 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
     }, 'link-' + l.name)
   })
 
-  const stats = `检查时间: ${new Date(state.checkedAt ?? Date.now()).toLocaleString()}${state.cached ? '（缓存）' : ''} · ${state.npm.length} 个 npm 插件 · ${outdatedNpm.length} 可更新 · ${state.linked.length} 个 link（${linkUpdatableCount} 可更新）`
+  const stats = t.statsText(
+    new Date(state.checkedAt ?? Date.now()).toLocaleString(),
+    !!state.cached,
+    state.npm.length,
+    outdatedNpm.length,
+    state.linked.length,
+    linkUpdatableCount,
+  )
 
   // 主程序状态条（3.6）
   const mainNode = (() => {
@@ -710,10 +731,8 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
     const updateable = !!main.updateable
     const outdated = !!main.outdated
     const label = outdated
-      ? updateable
-        ? `主程序可更新（${main.current} → ${main.latest}）`
-        : `主程序可更新（${main.current} → ${main.latest}，需在配置启用）`
-      : `主程序已是最新（${main.current ?? '?'}）`
+      ? t.mainStatusOutdated(main.current ?? '?', main.latest ?? '?')
+      : t.mainStatusLatest(main.current ?? '?')
     const style: any = {
       display: 'flex', alignItems: 'center', gap: 8, margin: '8px 0', padding: '9px 12px',
       border: `1px solid ${outdated ? 'var(--dsw-alias-state-business-primary, #2563eb)' : 'var(--dsw-alias-border-l2, rgba(128,128,128,0.2))'}`,
@@ -724,7 +743,7 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
           style: { ...C.updateBtn },
           onClick: (e: any) => {
             e.stopPropagation()
-            if (!window.confirm('确定更新 DSH 主程序？更新后需重启 DSH。')) return
+            if (!window.confirm(t.updateMainConfirm)) return
             fetch(API + '/update-main', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirm: true }) })
               .then((r) => r.json())
               .then((d: any) => {
@@ -732,9 +751,9 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
                 setMsgErr(!(d?.ok ?? d?.value?.ok))
                 setTimeout(() => refresh(true), 1500)
               })
-              .catch((err: any) => { setMsg('更新主程序失败: ' + err, ); setMsgErr(true) })
+              .catch((err: any) => { setMsg('Error: ' + err); setMsgErr(true) })
           },
-          children: '更新主程序',
+          children: t.updateMainBtn,
         }, 'mainbtn')
       : null
     return jsxs('div', {
@@ -753,7 +772,17 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
     style: C.page,
     children: [
       jsx('style', { children: '@keyframes dshpu-spin{to{transform:rotate(360deg)}} .dshpu-link:hover{text-decoration:underline !important;}' }),
-      jsx('h3', { style: C.h3, children: '插件更新检查（dsh-plugin-updater）' }),
+      jsxs('div', {
+        style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+        children: [
+          jsx('h3', { style: { ...C.h3, margin: 0 }, children: t.title }),
+          jsx('button', {
+            style: { ...C.btnGhost, padding: '3px 9px', fontSize: 11.5, cursor: 'pointer', borderRadius: 6 },
+            onClick: () => changeLocale(locale === 'zh' ? 'en' : 'zh'),
+            children: locale === 'zh' ? '🌐 English' : '🌐 简体中文',
+          }),
+        ],
+      }),
       jsx('p', { style: C.stats, children: stats }),
       mainNode,
       needRestart ? jsxs('div', {
@@ -768,7 +797,7 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
             style: { display: 'flex', alignItems: 'center', gap: 6 },
             children: [
               jsx('span', { style: { fontSize: 16 }, children: '⚡' }),
-              jsx('span', { style: { fontWeight: 500 }, children: '插件版本已变更！可通过热重载即时生效，或重启 DSH 服务。' }),
+              jsx('span', { style: { fontWeight: 500 }, children: t.restartBanner }),
             ],
           }),
           jsxs('div', {
@@ -778,12 +807,12 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
                 style: { ...C.btnGhost, padding: '4px 10px', fontSize: 12, cursor: 'pointer', borderRadius: 6 },
                 onClick: triggerHotReload,
                 disabled: reloading,
-                children: reloading ? '重载中…' : '🔄 立即热重载',
+                children: reloading ? t.hotReloading : t.hotReload,
               }),
               jsx('button', {
                 style: { ...C.btnGhost, padding: '4px 10px', fontSize: 12, cursor: 'pointer', borderRadius: 6 },
                 onClick: copyRestartCommand,
-                children: '📋 复制重启命令',
+                children: t.copyRestartCmd,
               }),
             ],
           }),
@@ -796,7 +825,7 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
             style: { ...C.btn, ...C.btnGhost, ...(checking || busy ? C.btnDisabled : {}) },
             disabled: checking || busy,
             onClick: () => refresh(true),
-            children: checking ? '检查中…' : '🔄 重新检查',
+            children: checking ? t.checking : t.recheck,
           }),
           jsx('button', {
             style: {
@@ -808,31 +837,31 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
               const toUpdate = selectedPkgs.size > 0
                 ? allUpdatableList.filter((p) => selectedPkgs.has(p.name))
                 : allUpdatableList
-              runUpdate(toUpdate, selectedPkgs.size > 0 ? `更新所选 (${toUpdate.length})` : '全部')
+              runUpdate(toUpdate, selectedPkgs.size > 0 ? `${t.updateSelected} (${toUpdate.length})` : t.updateAll)
             },
             children: busy
-              ? '更新中…'
+              ? t.updating
               : selectedPkgs.size > 0
-              ? `更新所选（${selectedPkgs.size}）`
-              : `全部更新（${allUpdatableList.length}）`,
+              ? `${t.updateSelected}（${selectedPkgs.size}）`
+              : `${t.updateAll}（${allUpdatableList.length}）`,
           }),
           allUpdatableList.length > 0
             ? jsx('button', {
                 style: { ...C.btnGhost, padding: '6px 12px', fontSize: 12.5, cursor: 'pointer', borderRadius: 8 },
                 onClick: toggleSelectAll,
-                children: selectedPkgs.size >= allUpdatableList.length && allUpdatableList.length > 0 ? '取消全选' : `全选 (${allUpdatableList.length})`,
+                children: selectedPkgs.size >= allUpdatableList.length && allUpdatableList.length > 0 ? t.deselectAll : `${t.selectAll} (${allUpdatableList.length})`,
               })
             : null,
           jsx('button', {
             style: { ...C.btnGhost, padding: '6px 12px', fontSize: 12.5, cursor: 'pointer', borderRadius: 8 },
             disabled: doctorRunning,
             onClick: runDoctor,
-            children: doctorRunning ? '体检中…' : '🩺 环境体检',
+            children: doctorRunning ? t.healthChecking : t.healthCheck,
           }),
           jsx('button', {
             style: { ...C.btnGhost, padding: '6px 12px', fontSize: 12.5, cursor: 'pointer', borderRadius: 8 },
             onClick: () => setShowConfig((v) => !v),
-            children: showConfig ? '收起设置 ⚙️' : '设置 ⚙️',
+            children: showConfig ? t.closeSettings : t.settings,
           }),
         ].filter(Boolean),
       }),
@@ -844,22 +873,22 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
           fontSize: 13, display: 'flex', flexDirection: 'column', gap: 10,
         },
         children: [
-          jsx('div', { style: { fontWeight: 600, color: 'var(--dsw-alias-label-primary, #ddd)' }, children: '⚙️ 插件更新设置' }),
+          jsx('div', { style: { fontWeight: 600, color: 'var(--dsw-alias-label-primary, #ddd)' }, children: t.settingsTitle }),
           jsxs('div', {
             style: { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' },
             children: [
-              jsx('span', { style: { color: 'var(--dsw-alias-label-secondary, #888)' }, children: '自动定时检查周期：' }),
+              jsx('span', { style: { color: 'var(--dsw-alias-label-secondary, #888)' }, children: t.checkIntervalLabel }),
               jsx('select', {
                 style: { padding: '4px 8px', borderRadius: 6, border: '1px solid var(--dsw-alias-border-l2, rgba(128,128,128,0.3))', background: 'var(--dsw-alias-bg-layer-1, transparent)', color: 'var(--dsw-alias-label-primary, #ddd)', fontSize: 12.5 },
                 value: cfgInterval,
                 onChange: (e: any) => setCfgInterval(Number(e.target.value)),
                 children: [
-                  jsx('option', { value: 1, children: '每 1 小时' }),
-                  jsx('option', { value: 3, children: '每 3 小时' }),
-                  jsx('option', { value: 6, children: '每 6 小时（推荐默认）' }),
-                  jsx('option', { value: 12, children: '每 12 小时' }),
-                  jsx('option', { value: 24, children: '每 24 小时' }),
-                  jsx('option', { value: 0, children: '仅手动检查（关闭定时）' }),
+                  jsx('option', { value: 1, children: t.interval1h }),
+                  jsx('option', { value: 3, children: t.interval3h }),
+                  jsx('option', { value: 6, children: t.interval6h }),
+                  jsx('option', { value: 12, children: t.interval12h }),
+                  jsx('option', { value: 24, children: t.interval24h }),
+                  jsx('option', { value: 0, children: t.intervalManual }),
                 ],
               }),
             ],
@@ -871,7 +900,7 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
                 style: { display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', color: 'var(--dsw-alias-label-primary, #ddd)' },
                 children: [
                   jsx('input', { type: 'checkbox', checked: cfgNotify, onChange: (e: any) => setCfgNotify(e.target.checked) }),
-                  '发现新版本时显示右下角铃铛通知',
+                  t.notifyLabel,
                 ],
               }),
             ],
@@ -879,11 +908,11 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
           jsxs('div', {
             style: { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' },
             children: [
-              jsx('span', { style: { color: 'var(--dsw-alias-label-secondary, #888)' }, children: 'GitHub Token（可选，提高配额）：' }),
+              jsx('span', { style: { color: 'var(--dsw-alias-label-secondary, #888)' }, children: t.githubTokenLabel }),
               jsx('input', {
                 type: 'password',
                 style: { padding: '4px 8px', borderRadius: 6, border: '1px solid var(--dsw-alias-border-l2, rgba(128,128,128,0.3))', background: 'var(--dsw-alias-bg-layer-1, transparent)', color: 'var(--dsw-alias-label-primary, #ddd)', fontSize: 12.5, minWidth: 200 },
-                placeholder: 'ghp_... (可留空)',
+                placeholder: t.githubTokenPlaceholder,
                 value: cfgToken,
                 onChange: (e: any) => setCfgToken(e.target.value),
               }),
@@ -892,8 +921,8 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
           jsxs('div', {
             style: { display: 'flex', gap: 8, marginTop: 4 },
             children: [
-              jsx('button', { style: { ...C.btn, padding: '5px 14px', fontSize: 12 }, onClick: saveConfig, children: '保存配置' }),
-              jsx('button', { style: { ...C.btnGhost, padding: '5px 14px', fontSize: 12, cursor: 'pointer', borderRadius: 8 }, onClick: () => setShowConfig(false), children: '取消' }),
+              jsx('button', { style: { ...C.btn, padding: '5px 14px', fontSize: 12 }, onClick: saveConfig, children: t.saveConfig }),
+              jsx('button', { style: { ...C.btnGhost, padding: '5px 14px', fontSize: 12, cursor: 'pointer', borderRadius: 8 }, onClick: () => setShowConfig(false), children: t.cancel }),
             ],
           }),
         ],
@@ -911,13 +940,13 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
             children: [
               jsxs('span', {
                 style: { fontWeight: 600, color: doctorResult.healthy ? '#1e9e54' : '#d98b0f' },
-                children: [doctorResult.healthy ? '✅ 插件环境体检通过：' : '⚠️ 环境体检诊断完成：', `已扫描 ${doctorResult.scanned} 个插件依赖`],
+                children: [doctorResult.healthy ? t.doctorPass : t.doctorWarn, ` ${t.doctorScanned(doctorResult.scanned)}`],
               }),
               jsx('button', { style: { background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--dsw-alias-label-secondary, #888)' }, onClick: () => setDoctorResult(null), children: '✕' }),
             ],
           }),
-          doctorResult.healedJunctions?.length ? jsx('p', { style: { margin: '6px 0 0', color: 'var(--dsw-alias-label-primary, #ddd)' }, children: `🔧 已成功自动自愈 ${doctorResult.healedJunctions.length} 个软链 Junction：${doctorResult.healedJunctions.join(', ')}` }) : null,
-          doctorResult.missingDeps?.length ? jsx('p', { style: { margin: '6px 0 0', color: '#e74c3c' }, children: `⚠️ 缺失 node_modules 模块：${doctorResult.missingDeps.join(', ')}` }) : null,
+          doctorResult.healedJunctions?.length ? jsx('p', { style: { margin: '6px 0 0', color: 'var(--dsw-alias-label-primary, #ddd)' }, children: t.doctorHealed(doctorResult.healedJunctions) }) : null,
+          doctorResult.missingDeps?.length ? jsx('p', { style: { margin: '6px 0 0', color: '#e74c3c' }, children: t.doctorMissing(doctorResult.missingDeps) }) : null,
         ].filter(Boolean),
       }) : null,
       hasItems ? jsxs('div', {
@@ -925,7 +954,7 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
         children: [
           jsx('input', {
             style: C.searchInput,
-            placeholder: '搜索插件名称或功能简介...',
+            placeholder: t.searchPlaceholder,
             value: searchQuery,
             onChange: (e: any) => setSearchQuery(e.target.value),
           }),
@@ -935,28 +964,28 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
               jsx('button', {
                 style: { ...C.tabBtn, ...(tab === 'all' ? C.tabBtnActive : {}) },
                 onClick: () => setTab('all'),
-                children: `全部 (${state.npm.length + state.linked.length})`,
+                children: `${t.tabAll} (${state.npm.length + state.linked.length})`,
               }),
               jsx('button', {
                 style: { ...C.tabBtn, ...(tab === 'outdated' ? C.tabBtnActive : {}) },
                 onClick: () => setTab('outdated'),
-                children: `可更新 (${outdatedNpm.length + linkUpdatableCount})`,
+                children: `${t.tabOutdated} (${outdatedNpm.length + linkUpdatableCount})`,
               }),
               jsx('button', {
                 style: { ...C.tabBtn, ...(tab === 'npm' ? C.tabBtnActive : {}) },
                 onClick: () => setTab('npm'),
-                children: `NPM (${state.npm.length})`,
+                children: `${t.tabNpm} (${state.npm.length})`,
               }),
               jsx('button', {
                 style: { ...C.tabBtn, ...(tab === 'link' ? C.tabBtnActive : {}) },
                 onClick: () => setTab('link'),
-                children: `Link (${state.linked.length})`,
+                children: `${t.tabLink} (${state.linked.length})`,
               }),
               totalIgnoredCount > 0
                 ? jsx('button', {
                     style: { ...C.tabBtn, ...(tab === 'ignored' ? C.tabBtnActive : {}) },
                     onClick: () => setTab('ignored'),
-                    children: `已忽略 (${totalIgnoredCount})`,
+                    children: `${t.tabIgnored} (${totalIgnoredCount})`,
                   })
                 : null,
             ].filter(Boolean),
@@ -969,7 +998,7 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
       filteredNpm.length
         ? jsxs('div', {
             children: [
-              jsx('div', { style: C.section, children: `npm 插件 (${filteredNpm.length})` }),
+              jsx('div', { style: C.section, children: `${t.npmSection} (${filteredNpm.length})` }),
               jsx('ul', { style: C.grid, children: npmItems }),
             ],
           })
@@ -977,16 +1006,16 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
       filteredLinked.length
         ? jsxs('div', {
             children: [
-              jsx('div', { style: C.section, children: `本地安装（link） (${filteredLinked.length})` }),
+              jsx('div', { style: C.section, children: `${t.linkSection} (${filteredLinked.length})` }),
               jsx('ul', { style: C.grid, children: linkItems }),
             ],
           })
         : null,
       hasItems && !hasFilteredItems
-        ? jsx('p', { style: { ...C.stats, margin: '20px 0', textAlign: 'center' }, children: '未找到符合条件的插件' }, 'no-match')
+        ? jsx('p', { style: { ...C.stats, margin: '20px 0', textAlign: 'center' }, children: t.noMatch }, 'no-match')
         : null,
       !hasItems && !state.errors.length
-        ? jsx('p', { style: C.stats, children: '暂无插件信息' }, 'empty')
+        ? jsx('p', { style: C.stats, children: t.emptyList }, 'empty')
         : null,
       msg ? jsx('div', { style: { ...C.msg, ...(msgErr ? C.msgErr : {}) }, children: msg }) : null,
       // 3.9: 更新历史（折叠）
@@ -996,7 +1025,7 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
           jsx('button', {
             style: { ...C.btnGhost, padding: '5px 12px', fontSize: 12, cursor: 'pointer', borderRadius: 8 },
             onClick: () => setShowHistory((v) => !v),
-            children: showHistory ? '收起更新历史' : `更新历史（${history.length}）`,
+            children: showHistory ? t.hideHistory : `${t.historyTitle}（${history.length}）`,
           }),
           showHistory && history.length
             ? jsx('ul', {
@@ -1016,9 +1045,9 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
                       h.ok && h.from && h.from !== 'rollback' && h.from !== h.to
                         ? jsx('button', {
                             style: { background: 'transparent', border: '1px solid var(--dsw-alias-border-l2, rgba(128,128,128,0.3))', color: 'var(--dsw-alias-state-business-primary, #2563eb)', borderRadius: 4, fontSize: 11, cursor: 'pointer', padding: '1px 6px' },
-                            title: `一键将 ${h.name} 回滚降级到 ${h.from}`,
+                            title: t.rollbackTo(h.from),
                             onClick: () => runRollback(h.name, h.from, h.kind),
-                            children: `↩ 回滚到 ${h.from}`,
+                            children: t.rollbackTo(h.from),
                           }, 'rb-' + h.name)
                         : null,
                     ].filter(Boolean),
@@ -1027,13 +1056,13 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
               }, 'history')
             : null,
           !history.length && showHistory
-            ? jsx('p', { style: { ...C.stats, marginTop: 6 }, children: '（暂无更新记录）' }, 'hist-empty')
+            ? jsx('p', { style: { ...C.stats, marginTop: 6 }, children: t.noHistory }, 'hist-empty')
             : null,
         ],
       }),
       jsx('p', {
         style: C.note,
-        children: '说明：点插件名可打开官网/仓库；npm 插件可单独或全部更新；link 插件若为 git 仓库用「git 更新」同步，非 git 请手动更新。结果缓存 10 分钟，「重新检查」强制刷新。更新后需重启 DSH 生效。',
+        children: t.footerNote,
       }),
       // 3.8: toast 容器
       toasts.length
