@@ -23,54 +23,58 @@ export const inject = ['slots']
 const API = '/@dsh-external/dsh-plugin-updater/api'
 
 const C: Record<string, any> = {
-  page: { fontSize: 13, color: 'var(--theme-text,#ddd)', fontFamily: 'inherit' },
-  h3: { margin: '0 0 8px', fontSize: 15 },
-  stats: { color: 'var(--theme-text-secondary,#888)', fontSize: 11, margin: '0 0 10px' },
+  page: { fontSize: 13.5, color: 'var(--dsw-alias-label-primary, #ddd)', fontFamily: 'inherit', lineHeight: 1.5 },
+  h3: { margin: '0 0 8px', fontSize: 16, fontWeight: 600, color: 'var(--dsw-alias-label-primary, #ddd)' },
+  stats: { color: 'var(--dsw-alias-label-secondary, #888)', fontSize: 12, margin: '0 0 12px' },
   row: { display: 'flex', gap: 8, margin: '10px 0', flexWrap: 'wrap', alignItems: 'center' },
-  btn: { background: 'var(--theme-accent,#4f8cff)', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 14px', fontSize: 12, cursor: 'pointer' },
-  btnGhost: { background: 'transparent', border: '1px solid var(--theme-border,#333)', color: 'var(--theme-text,#ddd)' },
+  btn: { background: 'var(--dsw-static-neutral-bluish-400, var(--dsw-alias-brand-primary, #4f8cff))', color: '#fff', border: 'none', borderRadius: 8, padding: '7px 16px', fontSize: 13, fontWeight: 500, cursor: 'pointer' },
+  btnGhost: { background: 'var(--dsw-alias-bg-module-platform, transparent)', border: '1px solid var(--dsw-alias-border-l2, rgba(128,128,128,0.25))', color: 'var(--dsw-alias-label-primary, #ddd)' },
   btnDanger: { background: 'transparent', border: '1px solid #d33', color: '#d33' },
-  btnDisabled: { opacity: 0.5, cursor: 'default' },
-  section: { margin: '14px 0 6px', fontSize: 12, color: 'var(--theme-text-secondary,#999)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 },
+  btnDisabled: { opacity: 0.45, cursor: 'default' },
+  section: { margin: '16px 0 8px', fontSize: 12.5, color: 'var(--dsw-alias-label-secondary, #999)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 },
   grid: { listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 8 },
   list: { listStyle: 'none', margin: 0, padding: 0 },
   item: {
-    display: 'flex', flexDirection: 'column', gap: 4, padding: '10px 14px',
-    border: '1px solid var(--theme-border,#333)', borderRadius: 10, marginBottom: 0,
-    background: 'var(--theme-input-bg,#111)', boxShadow: '0 1px 3px rgba(0,0,0,.15)', minHeight: 42,
+    display: 'flex', flexDirection: 'column', gap: 4, padding: '11px 14px',
+    border: '1px solid var(--dsw-alias-border-l2, rgba(128,128,128,0.18))', borderRadius: 12, marginBottom: 0,
+    background: 'var(--dsw-alias-bg-module-platform, var(--dsw-alias-bg-layer-2, rgba(128,128,128,0.06)))',
+    boxShadow: '0 1px 3px rgba(0,0,0,0.04)', minHeight: 44,
   },
   itemHeader: { display: 'flex', alignItems: 'center', gap: 8, width: '100%' },
-  desc: { fontSize: 11, color: 'var(--theme-text-secondary,#888)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-  itemUpdating: { borderColor: 'var(--theme-accent,#4f8cff)', boxShadow: '0 0 0 1px var(--theme-accent,#4f8cff)' },
+  desc: { fontSize: 12, color: 'var(--dsw-alias-label-secondary, #888)', marginTop: 3, lineHeight: 1.4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  itemUpdating: { borderColor: 'var(--dsw-static-neutral-bluish-400, #4f8cff)', boxShadow: '0 0 0 1px var(--dsw-static-neutral-bluish-400, #4f8cff)' },
   spinner: {
-    display: 'inline-block', width: 10, height: 10, borderRadius: '50%', marginRight: 4,
-    border: '2px solid rgba(255,255,255,.2)', borderTopColor: 'var(--theme-accent,#4f8cff)',
+    display: 'inline-block', width: 11, height: 11, borderRadius: '50%', marginRight: 5,
+    border: '2px solid rgba(255,255,255,.25)', borderTopColor: '#fff',
     animation: 'dshpu-spin .8s linear infinite', verticalAlign: 'middle',
   },
-  name: { fontWeight: 600, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-  ver: { fontSize: 11, color: 'var(--theme-text-secondary,#888)', whiteSpace: 'nowrap' },
-  arrow: { color: 'var(--theme-accent,#4f8cff)' },
-  st: { fontSize: 10, padding: '2px 8px', borderRadius: 10, whiteSpace: 'nowrap' },
-  stOut: { background: 'rgba(240,180,60,.15)', color: '#f0b43c' },
-  stOk: { background: 'rgba(46,204,113,.15)', color: '#2ecc71' },
-  stLink: { background: 'rgba(150,150,150,.15)', color: '#999' },
-  stErr: { background: 'rgba(220,50,50,.15)', color: '#e74c3c' },
-  updateBtn: { background: 'var(--theme-accent,#4f8cff)', color: '#fff', border: 'none', borderRadius: 6, padding: '3px 10px', fontSize: 11, cursor: 'pointer', whiteSpace: 'nowrap' },
-  msg: { marginTop: 10, padding: '8px 10px', borderRadius: 6, background: 'var(--theme-input-bg,#111)', border: '1px solid var(--theme-border,#333)', whiteSpace: 'pre-wrap', maxHeight: 200, overflow: 'auto', fontSize: 11 },
-  msgErr: { borderColor: '#d33' },
-  note: { color: 'var(--theme-text-secondary,#888)', fontSize: 11, marginTop: 8 },
+  name: { fontSize: 14, fontWeight: 600, color: 'var(--dsw-alias-label-primary, #ddd)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  ver: { fontSize: 12.5, color: 'var(--dsw-alias-label-secondary, #888)', whiteSpace: 'nowrap', fontWeight: 500 },
+  arrow: { color: 'var(--dsw-static-neutral-bluish-400, #4f8cff)', fontSize: 12 },
+  st: { fontSize: 11.5, padding: '3px 8px', borderRadius: 6, whiteSpace: 'nowrap', fontWeight: 500 },
+  stOut: { background: 'rgba(240,180,60,0.18)', color: '#d98b0f' },
+  stOk: { background: 'rgba(46,204,113,0.18)', color: '#1e9e54' },
+  stLink: { background: 'rgba(128,128,128,0.14)', color: 'var(--dsw-alias-label-secondary, #777)' },
+  stErr: { background: 'rgba(220,50,50,0.18)', color: '#e74c3c' },
+  updateBtn: { background: 'var(--dsw-static-neutral-bluish-400, var(--dsw-alias-brand-primary, #4f8cff))', color: '#fff', border: 'none', borderRadius: 6, padding: '4px 11px', fontSize: 12, fontWeight: 500, cursor: 'pointer', whiteSpace: 'nowrap' },
+  msg: { marginTop: 12, padding: '10px 12px', borderRadius: 8, background: 'var(--dsw-alias-bg-module-platform, rgba(128,128,128,0.06))', border: '1px solid var(--dsw-alias-border-l2, rgba(128,128,128,0.2))', color: 'var(--dsw-alias-label-primary, #ddd)', whiteSpace: 'pre-wrap', maxHeight: 200, overflow: 'auto', fontSize: 12 },
+  msgErr: { borderColor: '#d33', color: '#e74c3c' },
+  note: { color: 'var(--dsw-alias-label-tertiary, var(--dsw-alias-label-secondary, #888))', fontSize: 12, marginTop: 10, lineHeight: 1.5 },
   searchInput: {
-    background: 'var(--theme-input-bg,#111)', border: '1px solid var(--theme-border,#333)',
-    color: 'var(--theme-text,#ddd)', borderRadius: 6, padding: '5px 10px', fontSize: 12,
+    background: 'var(--dsw-alias-bg-module-platform, var(--dsw-alias-bg-layer-2, rgba(128,128,128,0.06)))',
+    border: '1px solid var(--dsw-alias-border-l2, rgba(128,128,128,0.25))',
+    color: 'var(--dsw-alias-label-primary, #ddd)', borderRadius: 8, padding: '6px 12px', fontSize: 12.5,
     outline: 'none', flex: 1, minWidth: 160,
   },
   tabBtn: {
-    background: 'transparent', border: '1px solid var(--theme-border,#333)',
-    color: 'var(--theme-text-secondary,#888)', borderRadius: 16, padding: '3px 10px',
-    fontSize: 11, cursor: 'pointer', whiteSpace: 'nowrap',
+    background: 'var(--dsw-alias-bg-module-platform, transparent)',
+    border: '1px solid var(--dsw-alias-border-l2, rgba(128,128,128,0.25))',
+    color: 'var(--dsw-alias-label-secondary, #888)', borderRadius: 16, padding: '4px 12px',
+    fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap', transition: 'all .15s',
   },
   tabBtnActive: {
-    background: 'var(--theme-accent,#4f8cff)', borderColor: 'var(--theme-accent,#4f8cff)',
+    background: 'var(--dsw-static-neutral-bluish-400, var(--dsw-alias-brand-primary, #4f8cff))',
+    borderColor: 'var(--dsw-static-neutral-bluish-400, var(--dsw-alias-brand-primary, #4f8cff))',
     color: '#fff', fontWeight: 600,
   },
 }
@@ -277,7 +281,7 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
     const style: any = { ...C.item, ...(isUpdating ? C.itemUpdating : {}) }
     const nameNode = n.homepage
       ? jsx('a', {
-          style: { ...C.name, color: 'var(--theme-accent,#4f8cff)', cursor: 'pointer', textDecoration: 'none' },
+          style: { ...C.name, color: 'var(--dsw-static-neutral-bluish-400, var(--dsw-alias-brand-primary, #4f8cff))', cursor: 'pointer', textDecoration: 'none' },
           href: n.homepage,
           target: '_blank',
           rel: 'noopener noreferrer',
@@ -298,7 +302,7 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
       ]
       if (n.outdated) {
         verNode.push(jsx('span', { style: C.arrow, children: '→' }, 'arr'))
-        verNode.push(jsx('span', { style: { ...C.ver, color: '#f0b43c' }, children: n.latest }, 'latest'))
+        verNode.push(jsx('span', { style: { ...C.ver, color: '#d98b0f' }, children: n.latest }, 'latest'))
         verNode.push(jsx('button', {
           style: { ...C.updateBtn, ...(isUpdating || busy ? C.btnDisabled : {}) },
           disabled: isUpdating || busy,
@@ -314,7 +318,7 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
       statusNode = jsxs('span', { style: { display: 'flex', alignItems: 'center', gap: 6 }, children: verNode })
     }
     const ignoreBtn = jsx('button', {
-      style: { background: 'transparent', border: 'none', color: 'var(--theme-text-secondary,#888)', fontSize: 10, cursor: 'pointer', padding: 2, whiteSpace: 'nowrap' },
+      style: { background: 'transparent', border: 'none', color: 'var(--dsw-alias-label-tertiary, var(--dsw-alias-label-secondary, #888))', fontSize: 11.5, cursor: 'pointer', padding: 2, whiteSpace: 'nowrap' },
       title: ignoredNames.has(n.name) ? '取消忽略' : '忽略此插件更新',
       onClick: (e: any) => {
         e.stopPropagation()
@@ -333,7 +337,7 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
     const isUpdating = updatingOne(l.name)
     const nameNode = l.homepage
       ? jsx('a', {
-          style: { ...C.name, color: 'var(--theme-accent,#4f8cff)', cursor: 'pointer', textDecoration: 'none' },
+          style: { ...C.name, color: 'var(--dsw-static-neutral-bluish-400, var(--dsw-alias-brand-primary, #4f8cff))', cursor: 'pointer', textDecoration: 'none' },
           href: l.homepage,
           target: '_blank',
           rel: 'noopener noreferrer',
@@ -383,7 +387,7 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
       children: [
         nameNode, statusNode, buttonNode,
         jsx('button', {
-          style: { background: 'transparent', border: 'none', color: 'var(--theme-text-secondary,#888)', fontSize: 10, cursor: 'pointer', padding: 2, whiteSpace: 'nowrap' },
+          style: { background: 'transparent', border: 'none', color: 'var(--dsw-alias-label-tertiary, var(--dsw-alias-label-secondary, #888))', fontSize: 11.5, cursor: 'pointer', padding: 2, whiteSpace: 'nowrap' },
           title: ignoredNames.has(l.name) ? '取消忽略' : '忽略此插件更新',
           onClick: (e: any) => {
             e.stopPropagation()
@@ -413,9 +417,9 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
         : `主程序可更新（${main.current} → ${main.latest}，需在配置启用）`
       : `主程序已是最新（${main.current ?? '?'}）`
     const style: any = {
-      display: 'flex', alignItems: 'center', gap: 8, margin: '8px 0', padding: '8px 10px',
-      border: `1px solid ${outdated ? 'var(--theme-accent,#4f8cff)' : 'var(--theme-border,#333)'}`,
-      borderRadius: 6, background: 'var(--theme-input-bg,#111)', fontSize: 12,
+      display: 'flex', alignItems: 'center', gap: 8, margin: '8px 0', padding: '9px 12px',
+      border: `1px solid ${outdated ? 'var(--dsw-static-neutral-bluish-400, #4f8cff)' : 'var(--dsw-alias-border-l2, rgba(128,128,128,0.2))'}`,
+      borderRadius: 8, background: 'var(--dsw-alias-bg-module-platform, var(--dsw-alias-bg-layer-2, rgba(128,128,128,0.06)))', fontSize: 13,
     }
     const btn = outdated && updateable
       ? jsx('button', {
@@ -538,20 +542,20 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
         style: { marginTop: 12 },
         children: [
           jsx('button', {
-            style: { ...C.btnGhost, padding: '4px 10px', fontSize: 11, cursor: 'pointer' },
+            style: { ...C.btnGhost, padding: '5px 12px', fontSize: 12, cursor: 'pointer', borderRadius: 8 },
             onClick: () => setShowHistory((v) => !v),
             children: showHistory ? '收起更新历史' : `更新历史（${history.length}）`,
           }),
           showHistory && history.length
             ? jsx('ul', {
-                style: { ...C.list, marginTop: 6, fontSize: 11, maxHeight: 180, overflow: 'auto' },
+                style: { ...C.list, marginTop: 8, fontSize: 12, maxHeight: 180, overflow: 'auto', background: 'var(--dsw-alias-bg-module-platform, rgba(128,128,128,0.04))', border: '1px solid var(--dsw-alias-border-l2, rgba(128,128,128,0.15))', borderRadius: 8, padding: '6px 8px' },
                 children: history.slice(0, 30).map((h: any) =>
                   jsxs('li', {
-                    style: { padding: '4px 6px', color: h.ok ? 'inherit' : '#e74c3c' },
+                    style: { padding: '4px 6px', color: h.ok ? 'var(--dsw-alias-label-primary, inherit)' : '#e74c3c' },
                     children: [
-                      jsx('span', { children: `${h.at ? new Date(h.at).toLocaleString() : ''} ` }),
+                      jsx('span', { style: { color: 'var(--dsw-alias-label-tertiary, #999)' }, children: `${h.at ? new Date(h.at).toLocaleString() : ''} ` }),
                       jsx('span', { style: { fontWeight: 600 }, children: h.name }),
-                      jsx('span', { style: { color: 'var(--theme-text-secondary,#888)' }, children: h.from && h.to ? ` ${h.from} → ${h.to}` : '' }),
+                      jsx('span', { style: { color: 'var(--dsw-alias-label-secondary, #888)' }, children: h.from && h.to ? ` ${h.from} → ${h.to}` : '' }),
                       jsx('span', { children: h.ok ? ' ✅' : ' ❌' }),
                     ],
                   }, 'hist-' + (h.at ?? '') + h.name),
@@ -611,7 +615,7 @@ function mountBell(): () => void {
   container.style.cssText = 'position:fixed;right:16px;bottom:16px;z-index:9999;font-family:inherit;'
 
   const bell = document.createElement('button')
-  bell.style.cssText = 'position:relative;width:38px;height:38px;border-radius:50%;border:1px solid var(--theme-border,#333);background:var(--theme-input-bg,#111);color:var(--theme-text,#ddd);cursor:pointer;font-size:16px;box-shadow:0 2px 8px rgba(0,0,0,.25);'
+  bell.style.cssText = 'position:relative;width:38px;height:38px;border-radius:50%;border:1px solid var(--dsw-alias-border-l2, rgba(128,128,128,0.25));background:var(--dsw-alias-bg-layer-2, var(--dsw-alias-bg-module-platform, #111));color:var(--dsw-alias-label-primary, #ddd);cursor:pointer;font-size:16px;box-shadow:0 2px 8px rgba(0,0,0,.25);'
   bell.textContent = '🔔'
   bell.title = '插件更新通知'
 
@@ -619,14 +623,14 @@ function mountBell(): () => void {
   badge.style.cssText = 'position:absolute;top:-4px;right:-4px;min-width:16px;height:16px;border-radius:8px;background:#e74c3c;color:#fff;font-size:10px;line-height:16px;text-align:center;padding:0 4px;display:none;'
 
   const panel = document.createElement('div')
-  panel.style.cssText = 'display:none;position:absolute;bottom:46px;right:0;width:300px;max-height:360px;overflow:auto;background:var(--theme-input-bg,#151515);border:1px solid var(--theme-border,#333);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.4);color:var(--theme-text,#ddd);font-size:12px;'
+  panel.style.cssText = 'display:none;position:absolute;bottom:46px;right:0;width:300px;max-height:360px;overflow:auto;background:var(--dsw-alias-bg-layer-2, var(--dsw-alias-bg-module-platform, #151515));border:1px solid var(--dsw-alias-border-l2, rgba(128,128,128,0.25));border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.4);color:var(--dsw-alias-label-primary, #ddd);font-size:12px;'
 
   const panelHeader = document.createElement('div')
-  panelHeader.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border-bottom:1px solid var(--theme-border,#333);font-weight:600;'
+  panelHeader.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border-bottom:1px solid var(--dsw-alias-border-l2, rgba(128,128,128,0.2));font-weight:600;color:var(--dsw-alias-label-primary, #ddd);'
   panelHeader.textContent = '更新通知'
 
   const readAll = document.createElement('button')
-  readAll.style.cssText = 'background:transparent;border:1px solid var(--theme-border,#444);color:var(--theme-text,#ccc);border-radius:6px;padding:2px 8px;font-size:11px;cursor:pointer;'
+  readAll.style.cssText = 'background:transparent;border:1px solid var(--dsw-alias-border-l2, rgba(128,128,128,0.25));color:var(--dsw-alias-label-secondary, #ccc);border-radius:6px;padding:2px 8px;font-size:11px;cursor:pointer;'
   readAll.textContent = '全部已读'
 
   const list = document.createElement('div')
@@ -643,7 +647,7 @@ function mountBell(): () => void {
   const empty = () => {
     list.textContent = ''
     const e = document.createElement('div')
-    e.style.cssText = 'padding:14px 10px;color:var(--theme-text-secondary,#888);text-align:center;'
+    e.style.cssText = 'padding:14px 10px;color:var(--dsw-alias-label-secondary, #888);text-align:center;'
     e.textContent = '暂无更新通知'
     list.appendChild(e)
   }
@@ -663,15 +667,15 @@ function mountBell(): () => void {
         if (notifs.length) {
           for (const n of notifs.slice(0, 20)) {
             const row = document.createElement('div')
-            row.style.cssText = 'padding:8px 10px;border-bottom:1px solid var(--theme-border,#222);cursor:default;'
+            row.style.cssText = 'padding:8px 10px;border-bottom:1px solid var(--dsw-alias-border-l2, rgba(128,128,128,0.15));cursor:default;'
             if (n.read) row.style.opacity = '.55'
             const t = document.createElement('div')
-            t.style.cssText = 'font-weight:600;'
+            t.style.cssText = 'font-weight:600;color:var(--dsw-alias-label-primary,#ddd);'
             t.textContent = n.title
             row.appendChild(t)
             if (n.body) {
               const b = document.createElement('div')
-              b.style.cssText = 'color:var(--theme-text-secondary,#888);font-size:11px;margin-top:2px;'
+              b.style.cssText = 'color:var(--dsw-alias-label-secondary,#888);font-size:11px;margin-top:2px;'
               b.textContent = n.body
               row.appendChild(b)
             }
