@@ -79,6 +79,26 @@ export function installedVersion(dir: string, name: string): string | null {
   }
 }
 
+/** 读取 node_modules 中实际安装的插件描述。 */
+export function installedDescription(dir: string, name: string): string | undefined {
+  try {
+    const pkg = JSON.parse(readFileSync(join(dir, 'node_modules', ...name.split('/'), 'package.json'), 'utf8')) as { description?: string }
+    return typeof pkg?.description === 'string' && pkg.description.trim().length > 0 ? pkg.description.trim() : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** 读取指定本地目录的 package.json description。 */
+export function readTargetDescription(targetPath: string): string | undefined {
+  try {
+    const pkg = JSON.parse(readFileSync(join(targetPath, 'package.json'), 'utf8')) as { description?: string }
+    return typeof pkg?.description === 'string' && pkg.description.trim().length > 0 ? pkg.description.trim() : undefined
+  } catch {
+    return undefined
+  }
+}
+
 /** npm 插件主页：npmjs 页面（点击可查 repository）。 */
 export function npmHomepage(name: string): string {
   return `https://www.npmjs.com/package/${encodeURIComponent(name)}`
@@ -118,14 +138,15 @@ export async function checkNpmUpdates(
   for (const { name, latest } of fetched) {
     if (isIgnored && isIgnored(name)) continue
     const home = npmHomepage(name)
+    const current = installedVersion(dir, name)
+    const description = installedDescription(dir, name)
     if (!latest) {
-      npm.push({ name, current: installedVersion(dir, name), latest: null, outdated: false, error: '获取最新版本失败', homepage: home })
+      npm.push({ name, current, latest: null, outdated: false, description, error: '获取最新版本失败', homepage: home })
       errors.push(`${name}: 获取最新版本失败`)
       continue
     }
-    const current = installedVersion(dir, name)
     const isOutdated = !!current && isNewer(latest, current)
-    npm.push({ name, current, latest, outdated: isOutdated, homepage: home })
+    npm.push({ name, current, latest, outdated: isOutdated, description, homepage: home })
   }
   return { npm, errors }
 }

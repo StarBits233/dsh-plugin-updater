@@ -32,13 +32,15 @@ const C: Record<string, any> = {
   btnDanger: { background: 'transparent', border: '1px solid #d33', color: '#d33' },
   btnDisabled: { opacity: 0.5, cursor: 'default' },
   section: { margin: '14px 0 6px', fontSize: 12, color: 'var(--theme-text-secondary,#999)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 },
-  grid: { listStyle: 'none', margin: 0, padding: 0, display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 8 },
+  grid: { listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 8 },
   list: { listStyle: 'none', margin: 0, padding: 0 },
   item: {
-    display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px',
+    display: 'flex', flexDirection: 'column', gap: 4, padding: '10px 14px',
     border: '1px solid var(--theme-border,#333)', borderRadius: 10, marginBottom: 0,
     background: 'var(--theme-input-bg,#111)', boxShadow: '0 1px 3px rgba(0,0,0,.15)', minHeight: 42,
   },
+  itemHeader: { display: 'flex', alignItems: 'center', gap: 8, width: '100%' },
+  desc: { fontSize: 11, color: 'var(--theme-text-secondary,#888)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   itemUpdating: { borderColor: 'var(--theme-accent,#4f8cff)', boxShadow: '0 0 0 1px var(--theme-accent,#4f8cff)' },
   spinner: {
     display: 'inline-block', width: 10, height: 10, borderRadius: '50%', marginRight: 4,
@@ -64,6 +66,7 @@ interface NpmItem {
   current: string | null
   latest: string | null
   outdated: boolean
+  description?: string
   error?: string
   homepage?: string
 }
@@ -71,6 +74,7 @@ interface NpmItem {
 interface LinkItem {
   name: string
   spec: string
+  description?: string
   homepage?: string
   gitBehind?: boolean
   gitBranch?: string
@@ -281,7 +285,10 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
       },
       children: ignoredNames.has(n.name) ? '已忽略↩' : '忽略',
     }, 'ignore-' + n.name)
-    return jsxs('li', { style, children: [nameNode, statusNode, ignoreBtn] }, 'npm-' + n.name)
+
+    const header = jsxs('div', { style: C.itemHeader, children: [nameNode, statusNode, ignoreBtn] })
+    const desc = n.description ? jsx('div', { style: C.desc, title: n.description, children: n.description }) : null
+    return jsxs('li', { style, children: [header, desc].filter(Boolean) }, 'npm-' + n.name)
   })
 
   // link 插件列表
@@ -333,8 +340,9 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
     } else {
       statusNode = jsx('span', { style: { ...C.st, ...C.stLink }, children: '本地目录' }, 'local2')
     }
-    return jsxs('li', {
-      style: { ...C.item, ...(isUpdatingNode ? C.itemUpdating : {}) },
+
+    const header = jsxs('div', {
+      style: C.itemHeader,
       children: [
         nameNode, statusNode, buttonNode,
         jsx('button', {
@@ -347,6 +355,11 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
           children: ignoredNames.has(l.name) ? '已忽略↩' : '忽略',
         }, 'ignore-link-' + l.name),
       ],
+    })
+    const desc = l.description ? jsx('div', { style: C.desc, title: l.description, children: l.description }) : null
+    return jsxs('li', {
+      style: { ...C.item, ...(isUpdatingNode ? C.itemUpdating : {}) },
+      children: [header, desc].filter(Boolean),
     }, 'link-' + l.name)
   })
 
