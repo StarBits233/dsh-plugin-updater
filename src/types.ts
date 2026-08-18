@@ -11,6 +11,7 @@ export interface NpmItem {
   current: string | null
   latest: string | null
   outdated: boolean
+  ignored?: boolean
   description?: string
   error?: string
   homepage?: string
@@ -20,6 +21,7 @@ export interface NpmItem {
 export interface LinkItem {
   name: string
   spec: string
+  ignored?: boolean
   description?: string
   homepage?: string
   /** git 是否有远程新提交（落后 origin 时 true） */

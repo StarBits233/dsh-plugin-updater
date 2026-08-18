@@ -177,10 +177,23 @@ async function computeUpdates(profile: string, isIgnored?: (name: string) => boo
   }
 
   const registry = readRegistryUrl(dir, dshHome())
-  const { npm, errors } = await checkNpmUpdates(dir, npmNames, registry, { timeoutMs: fetchTimeoutMs, isIgnored })
+  const { npm, errors } = await checkNpmUpdates(dir, npmNames, registry, { timeoutMs: fetchTimeoutMs })
+
+  if (isIgnored) {
+    for (const n of npm) {
+      if (isIgnored(n.name)) {
+        n.ignored = true
+      }
+    }
+    for (const l of linked) {
+      if (isIgnored(l.name)) {
+        l.ignored = true
+      }
+    }
+  }
 
   const outdated: OutdatedItem[] = npm
-    .filter((n): n is NpmItem & { current: string; latest: string } => n.outdated && !!n.current && !!n.latest)
+    .filter((n): n is NpmItem & { current: string; latest: string } => n.outdated && !n.ignored && !!n.current && !!n.latest)
     .map((n) => ({ name: n.name, current: n.current!, latest: n.latest! }))
 
   return { checkedAt: new Date().toISOString(), profile, profileDir: dir, npm, outdated, linked, errors }
@@ -201,7 +214,7 @@ async function checkUpdates(ctx: Context, config: Config, force = false): Promis
   const store = st(ctx)
   if (config.notifyNewUpdates) {
     for (const n of value.npm) {
-      if (n.outdated && n.latest && n.current) {
+      if (n.outdated && !n.ignored && n.latest && n.current) {
         if (store.rememberLatest(n.name, n.latest, n.current)) {
           store.pushNotification({
             kind: 'update-available',

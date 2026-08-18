@@ -251,12 +251,13 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
       })
   }
 
-  const outdatedNpm = state.npm.filter((n) => n.outdated)
-  const linkUpdatableCount = state.linked.filter((l) => l.gitBehind || (!!l.ghLatest && !l.homepage)).length
+  const outdatedNpm = state.npm.filter((n) => n.outdated && !n.ignored && !ignoredNames.has(n.name))
+  const linkUpdatableCount = state.linked.filter((l) => !l.ignored && !ignoredNames.has(l.name) && (l.gitBehind || (!!l.ghLatest && !l.homepage))).length
+  const totalIgnoredCount = state.npm.filter((n) => n.ignored || ignoredNames.has(n.name)).length + state.linked.filter((l) => l.ignored || ignoredNames.has(l.name)).length
   const updatingOne = (name: string) => updating.includes(name)
 
   const [searchQuery, setSearchQuery] = useState('')
-  const [tab, setTab] = useState<'all' | 'outdated' | 'npm' | 'link'>('all')
+  const [tab, setTab] = useState<'all' | 'outdated' | 'npm' | 'link' | 'ignored'>('all')
 
   const query = searchQuery.trim().toLowerCase()
   const matchQuery = (item: { name: string; description?: string }) => {
@@ -265,12 +266,18 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
   }
 
   const filteredNpm = state.npm.filter((n) => {
+    const isIgn = n.ignored || ignoredNames.has(n.name)
+    if (tab === 'ignored') return isIgn && matchQuery(n)
+    if (isIgn && tab === 'outdated') return false
     if (tab === 'link') return false
     if (tab === 'outdated' && !n.outdated) return false
     return matchQuery(n)
   })
 
   const filteredLinked = state.linked.filter((l) => {
+    const isIgn = l.ignored || ignoredNames.has(l.name)
+    if (tab === 'ignored') return isIgn && matchQuery(l)
+    if (isIgn && tab === 'outdated') return false
     if (tab === 'npm') return false
     const isUpdatable = l.gitBehind || (!!l.ghLatest && !l.homepage)
     if (tab === 'outdated' && !isUpdatable) return false
@@ -280,6 +287,7 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
   // npm 插件列表（卡片）
   const npmItems: any[] = filteredNpm.map((n) => {
     const isUpdating = updatingOne(n.name)
+    const isIgn = n.ignored || ignoredNames.has(n.name)
     const style: any = { ...C.item, ...(isUpdating ? C.itemUpdating : {}) }
     const nameNode = jsx('div', {
       style: C.nameWrapper,
@@ -296,9 +304,21 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
           })
         : jsx('span', { style: C.name, children: n.name }),
     })
-    // 状态区：错误/获取失败/版本+按钮
+    // 状态区：已忽略 / 错误 / 获取失败 / 版本 + 按钮
     let statusNode: any
-    if (n.error) {
+    let ignoreNode: any = null
+    if (isIgn) {
+      statusNode = jsx('span', { style: { ...C.st, ...C.stLink }, children: '已忽略' }, 'ign')
+      ignoreNode = jsx('button', {
+        style: { ...C.btnGhost, padding: '3px 8px', fontSize: 11, cursor: 'pointer', borderRadius: 6 },
+        title: '恢复此插件的更新检查与提醒',
+        onClick: (e: any) => {
+          e.stopPropagation()
+          toggleIgnore(n.name)
+        },
+        children: '取消忽略',
+      }, 'unign-' + n.name)
+    } else if (n.error) {
       statusNode = jsx('span', { style: { ...C.st, ...C.stErr }, children: n.error }, 'err')
     } else if (n.latest === null) {
       statusNode = jsx('span', { style: { ...C.st, ...C.stErr }, children: '获取失败' }, 'err')
@@ -318,22 +338,25 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
           },
           children: isUpdating ? jsx('span', { style: C.spinner }) : '更新',
         }, 'btn'))
+        // 仅在可更新状态下提供低调的忽略入口，且有防误触二次确认
+        ignoreNode = jsx('button', {
+          style: { background: 'transparent', border: 'none', color: 'var(--dsw-alias-label-tertiary, #888)', fontSize: 11, cursor: 'pointer', padding: '2px 4px', whiteSpace: 'nowrap' },
+          title: '忽略此版本更新提醒',
+          onClick: (e: any) => {
+            e.stopPropagation()
+            if (window.confirm(`确定忽略 ${n.name} 的更新提醒？可在「已忽略」分类中随时恢复。`)) {
+              toggleIgnore(n.name)
+            }
+          },
+          children: '忽略',
+        }, 'ignore-' + n.name)
       } else {
         verNode.push(jsx('span', { style: { ...C.st, ...C.stOk }, children: '最新' }, 'ok'))
       }
       statusNode = jsxs('span', { style: { display: 'flex', alignItems: 'center', gap: 6 }, children: verNode })
     }
-    const ignoreBtn = jsx('button', {
-      style: { background: 'transparent', border: 'none', color: 'var(--dsw-alias-label-tertiary, var(--dsw-alias-label-secondary, #888))', fontSize: 11.5, cursor: 'pointer', padding: 2, whiteSpace: 'nowrap' },
-      title: ignoredNames.has(n.name) ? '取消忽略' : '忽略此插件更新',
-      onClick: (e: any) => {
-        e.stopPropagation()
-        toggleIgnore(n.name)
-      },
-      children: ignoredNames.has(n.name) ? '已忽略↩' : '忽略',
-    }, 'ignore-' + n.name)
 
-    const header = jsxs('div', { style: C.itemHeader, children: [nameNode, statusNode, ignoreBtn] })
+    const header = jsxs('div', { style: C.itemHeader, children: [nameNode, statusNode, ignoreNode].filter(Boolean) })
     const desc = n.description ? jsx('div', { style: C.desc, title: n.description, children: n.description }) : null
     return jsxs('li', { style, children: [header, desc].filter(Boolean) }, 'npm-' + n.name)
   })
@@ -341,6 +364,7 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
   // link 插件列表
   const linkItems: any[] = filteredLinked.map((l) => {
     const isUpdating = updatingOne(l.name)
+    const isIgn = l.ignored || ignoredNames.has(l.name)
     const nameNode = jsx('div', {
       style: C.nameWrapper,
       children: l.homepage
@@ -356,13 +380,26 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
           })
         : jsx('span', { style: C.name, children: l.name }),
     })
-    // 状态区：无 git/GH → 本地目录；有 git → gitBehind 显示；无 git 有 GH → ghLatest 显示
+    // 状态区：已忽略 / 无 git/GH → 本地目录；有 git → gitBehind 显示；无 git 有 GH → ghLatest 显示
     let statusNode: any
     let buttonNode: any = null
+    let ignoreNode: any = null
     const ghRepo = l.ghRepo
-    const isGhUpdatable = !l.homepage && !!ghRepo && !!l.ghLatest
+    const isGhUpdatable = !l.homepage && !isIgn && !!ghRepo && !!l.ghLatest
     const isUpdatingNode = isUpdating && buttonNode
-    if (!l.homepage && !ghRepo) {
+
+    if (isIgn) {
+      statusNode = jsx('span', { style: { ...C.st, ...C.stLink }, children: '已忽略' }, 'ign')
+      buttonNode = jsx('button', {
+        style: { ...C.btnGhost, padding: '3px 8px', fontSize: 11, cursor: 'pointer', borderRadius: 6 },
+        title: '恢复此插件的更新检查与提醒',
+        onClick: (e: any) => {
+          e.stopPropagation()
+          toggleIgnore(l.name)
+        },
+        children: '取消忽略',
+      }, 'unign-' + l.name)
+    } else if (!l.homepage && !ghRepo) {
       statusNode = jsx('span', { style: { ...C.st, ...C.stLink }, children: '本地目录（无远程）' }, 'local')
     } else if (isGhUpdatable) {
       statusNode = jsx('span', { style: { ...C.st, ...C.stOut }, children: `可更新（GitHub ${l.ghTag ?? l.ghLatest}）` }, 'ghbehind')
@@ -375,6 +412,17 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
         },
         children: isUpdating ? jsx('span', { style: C.spinner }) : 'git 更新',
       } as any, 'ghbtn')
+      ignoreNode = jsx('button', {
+        style: { background: 'transparent', border: 'none', color: 'var(--dsw-alias-label-tertiary, #888)', fontSize: 11, cursor: 'pointer', padding: '2px 4px', whiteSpace: 'nowrap' },
+        title: '忽略此插件更新提醒',
+        onClick: (e: any) => {
+          e.stopPropagation()
+          if (window.confirm(`确定忽略 ${l.name} 的更新提醒？可在「已忽略」分类中随时恢复。`)) {
+            toggleIgnore(l.name)
+          }
+        },
+        children: '忽略',
+      }, 'ignore-' + l.name)
     } else if (l.homepage) {
       statusNode = l.gitBehind
         ? jsx('span', { style: { ...C.st, ...C.stOut }, children: `可更新（${l.gitBranch ?? 'git'}）` }, 'behind')
@@ -388,24 +436,26 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
         },
         children: isUpdating ? jsx('span', { style: C.spinner }) : 'git 更新',
       } as any, 'gitbtn')
+      if (l.gitBehind) {
+        ignoreNode = jsx('button', {
+          style: { background: 'transparent', border: 'none', color: 'var(--dsw-alias-label-tertiary, #888)', fontSize: 11, cursor: 'pointer', padding: '2px 4px', whiteSpace: 'nowrap' },
+          title: '忽略此插件更新提醒',
+          onClick: (e: any) => {
+            e.stopPropagation()
+            if (window.confirm(`确定忽略 ${l.name} 的更新提醒？可在「已忽略」分类中随时恢复。`)) {
+              toggleIgnore(l.name)
+            }
+          },
+          children: '忽略',
+        }, 'ignore-' + l.name)
+      }
     } else {
       statusNode = jsx('span', { style: { ...C.st, ...C.stLink }, children: '本地目录' }, 'local2')
     }
 
     const header = jsxs('div', {
       style: C.itemHeader,
-      children: [
-        nameNode, statusNode, buttonNode,
-        jsx('button', {
-          style: { background: 'transparent', border: 'none', color: 'var(--dsw-alias-label-tertiary, var(--dsw-alias-label-secondary, #888))', fontSize: 11.5, cursor: 'pointer', padding: 2, whiteSpace: 'nowrap' },
-          title: ignoredNames.has(l.name) ? '取消忽略' : '忽略此插件更新',
-          onClick: (e: any) => {
-            e.stopPropagation()
-            toggleIgnore(l.name)
-          },
-          children: ignoredNames.has(l.name) ? '已忽略↩' : '忽略',
-        }, 'ignore-link-' + l.name),
-      ],
+      children: [nameNode, statusNode, buttonNode, ignoreNode].filter(Boolean),
     })
     const desc = l.description ? jsx('div', { style: C.desc, title: l.description, children: l.description }) : null
     return jsxs('li', {
@@ -517,7 +567,14 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
                 onClick: () => setTab('link'),
                 children: `Link (${state.linked.length})`,
               }),
-            ],
+              totalIgnoredCount > 0
+                ? jsx('button', {
+                    style: { ...C.tabBtn, ...(tab === 'ignored' ? C.tabBtnActive : {}) },
+                    onClick: () => setTab('ignored'),
+                    children: `已忽略 (${totalIgnoredCount})`,
+                  })
+                : null,
+            ].filter(Boolean),
           }),
         ],
       }) : null,
