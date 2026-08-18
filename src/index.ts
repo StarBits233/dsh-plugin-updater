@@ -24,7 +24,7 @@ import type { Context } from 'cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 
 import {
-  readRegistryUrl, checkNpmUpdates, mapLimit, fetchLatest, readTargetDescription,
+  readRegistryUrl, checkNpmUpdates, mapLimit, fetchLatest, readTargetDescription, readTargetVersion,
 } from './registry.js'
 import {
   gitRemoteHomepage, gitBehindStatus, tryGitUpdate, resolveLinkTarget,
@@ -145,6 +145,7 @@ async function computeUpdates(profile: string, isIgnored?: (name: string) => boo
       linked.push({
         name,
         spec,
+        version: target ? readTargetVersion(target) : undefined,
         description: target ? readTargetDescription(target) : undefined,
         homepage: target ? gitRemoteHomepage(target) : undefined,
         ghRepo: target ? readGhRepo(target) : undefined,

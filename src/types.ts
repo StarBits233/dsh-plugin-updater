@@ -21,6 +21,7 @@ export interface NpmItem {
 export interface LinkItem {
   name: string
   spec: string
+  version?: string | null
   ignored?: boolean
   description?: string
   homepage?: string

@@ -89,6 +89,16 @@ export function installedDescription(dir: string, name: string): string | undefi
   }
 }
 
+/** 读取指定本地目录的 package.json version。 */
+export function readTargetVersion(targetPath: string): string | undefined {
+  try {
+    const pkg = JSON.parse(readFileSync(join(targetPath, 'package.json'), 'utf8')) as { version?: string }
+    return typeof pkg?.version === 'string' && pkg.version.trim().length > 0 ? pkg.version.trim() : undefined
+  } catch {
+    return undefined
+  }
+}
+
 /** 读取指定本地目录的 package.json description。 */
 export function readTargetDescription(targetPath: string): string | undefined {
   try {

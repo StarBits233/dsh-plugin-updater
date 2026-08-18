@@ -94,6 +94,7 @@ interface NpmItem {
 interface LinkItem {
   name: string
   spec: string
+  version?: string | null
   description?: string
   homepage?: string
   gitBehind?: boolean
@@ -388,8 +389,10 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
     const isGhUpdatable = !l.homepage && !isIgn && !!ghRepo && !!l.ghLatest
     const isUpdatingNode = isUpdating && buttonNode
 
+    const verSpan = l.version ? jsx('span', { style: C.ver, children: l.version }, 'ver-' + l.name) : null
+
     if (isIgn) {
-      statusNode = jsx('span', { style: { ...C.st, ...C.stLink }, children: '已忽略' }, 'ign')
+      statusNode = jsxs('span', { style: { display: 'flex', alignItems: 'center', gap: 6 }, children: [verSpan, jsx('span', { style: { ...C.st, ...C.stLink }, children: '已忽略' })].filter(Boolean) })
       buttonNode = jsx('button', {
         style: { ...C.btnGhost, padding: '3px 8px', fontSize: 11, cursor: 'pointer', borderRadius: 6 },
         title: '恢复此插件的更新检查与提醒',
@@ -400,9 +403,16 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
         children: '取消忽略',
       }, 'unign-' + l.name)
     } else if (!l.homepage && !ghRepo) {
-      statusNode = jsx('span', { style: { ...C.st, ...C.stLink }, children: '本地目录（无远程）' }, 'local')
+      statusNode = jsxs('span', { style: { display: 'flex', alignItems: 'center', gap: 6 }, children: [verSpan, jsx('span', { style: { ...C.st, ...C.stLink }, children: '本地目录（无远程）' })].filter(Boolean) })
     } else if (isGhUpdatable) {
-      statusNode = jsx('span', { style: { ...C.st, ...C.stOut }, children: `可更新（GitHub ${l.ghTag ?? l.ghLatest}）` }, 'ghbehind')
+      statusNode = jsxs('span', {
+        style: { display: 'flex', alignItems: 'center', gap: 6 },
+        children: [
+          verSpan,
+          jsx('span', { style: C.arrow, children: '→' }, 'arr'),
+          jsx('span', { style: { ...C.st, ...C.stOut }, children: `GitHub ${l.ghTag ?? l.ghLatest}` }, 'ghbehind'),
+        ].filter(Boolean),
+      })
       buttonNode = jsx('button', {
         style: { ...C.updateBtn, ...((isUpdating || busy) ? C.btnDisabled : {}) },
         disabled: isUpdating || busy,
@@ -424,9 +434,10 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
         children: '忽略',
       }, 'ignore-' + l.name)
     } else if (l.homepage) {
-      statusNode = l.gitBehind
+      const gitStatusBadge = l.gitBehind
         ? jsx('span', { style: { ...C.st, ...C.stOut }, children: `可更新（${l.gitBranch ?? 'git'}）` }, 'behind')
         : jsx('span', { style: { ...C.st, ...C.stOk }, children: '已是最新' }, 'ok')
+      statusNode = jsxs('span', { style: { display: 'flex', alignItems: 'center', gap: 6 }, children: [verSpan, gitStatusBadge].filter(Boolean) })
       buttonNode = jsx('button', {
         style: { ...C.updateBtn, ...((isUpdating || busy || !l.gitBehind) ? C.btnDisabled : {}) },
         disabled: isUpdating || busy || !l.gitBehind,
@@ -450,7 +461,7 @@ function PluginUpdaterSection(_props: { close?: () => void }): any {
         }, 'ignore-' + l.name)
       }
     } else {
-      statusNode = jsx('span', { style: { ...C.st, ...C.stLink }, children: '本地目录' }, 'local2')
+      statusNode = jsxs('span', { style: { display: 'flex', alignItems: 'center', gap: 6 }, children: [verSpan, jsx('span', { style: { ...C.st, ...C.stLink }, children: '本地目录' })].filter(Boolean) })
     }
 
     const header = jsxs('div', {

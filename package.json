@@ -1,6 +1,6 @@
 {
   "name": "@dsh-external/dsh-plugin-updater",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "DSH 插件更新检查：设置页一键检查/更新所有插件",
   "private": true,
   "type": "module",
