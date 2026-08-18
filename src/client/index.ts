@@ -129,29 +129,24 @@ interface UpdaterState {
   cached?: boolean
 }
 
-function getDshLocale(ctxLocale?: any): Locale {
-  // 1. 优先从 DSH 官方 locale service 读取
-  try {
-    const active = ctxLocale?.getLocale?.()?.active
-    if (active === 'zh' || active === 'en') return active
-  } catch { /* empty */ }
-
-  // 2. 从 DOM 环境探测 DSH 当前界面语言
+function getDshLocale(): Locale {
   if (typeof document !== 'undefined') {
+    // 1. 检查 html 属性
     const htmlLang = (document.documentElement.getAttribute('lang') || '').toLowerCase()
     if (htmlLang.startsWith('zh')) return 'zh'
     if (htmlLang.startsWith('en')) return 'en'
 
-    // 检查侧边栏或主界面是否有英文系统词汇（如 General / Settings / Models）
+    // 2. 检查设置菜单或导航中是否有中文系统特征词
     const bodyText = document.body?.innerText || ''
-    if (bodyText.includes('General') || bodyText.includes('Settings') || bodyText.includes('Plugins') || bodyText.includes('Models')) {
-      if (!bodyText.includes('通用设置') && !bodyText.includes('模型')) {
-        return 'en'
-      }
+    if (bodyText.includes('通用设置') || bodyText.includes('打开配置文件')) {
+      return 'zh'
+    }
+    if (bodyText.includes('General') || bodyText.includes('Open configuration file') || bodyText.includes('Agent presets')) {
+      return 'en'
     }
   }
 
-  // 3. 回退到浏览器 navigator
+  // 3. 检查系统/浏览器 navigator
   if (typeof navigator !== 'undefined') {
     return navigator.language?.toLowerCase().startsWith('zh') ? 'zh' : 'en'
   }
@@ -159,45 +154,20 @@ function getDshLocale(ctxLocale?: any): Locale {
   return 'en'
 }
 
-function PluginUpdaterSection(props: { close?: () => void; ctx?: any }): any {
-  const [locale, setLocale] = useState<Locale>(() => getDshLocale(props.ctx?.locale ?? (props.ctx as any)?.get?.('locale')))
+function PluginUpdaterSection(_props: { close?: () => void }): any {
+  const [locale, setLocale] = useState<Locale>(() => getDshLocale())
 
   useEffect(() => {
-    const ctxLocale = props.ctx?.locale ?? (props.ctx as any)?.get?.('locale')
-    let unsubLocale: (() => void) | undefined
-    if (ctxLocale?.subscribe) {
-      unsubLocale = ctxLocale.subscribe(() => {
-        setLocale(getDshLocale(ctxLocale))
-      })
-    }
-
-    let unsubCtx: (() => void) | undefined
-    if (props.ctx?.on) {
-      unsubCtx = props.ctx.on('locale/change', (snap: any) => {
-        if (snap?.active === 'zh' || snap?.active === 'en') {
-          setLocale(snap.active)
-        }
-      })
-    }
-
-    // 轮询检查 DOM 语言变化（无缝同步无需刷新的通用设置切换）
+    // 定时和观察 DOM 变化，自动跟随 DSH 通用设置中英文切换
     const timer = setInterval(() => {
-      const detected = getDshLocale(ctxLocale)
+      const detected = getDshLocale()
       setLocale((prev) => (prev !== detected ? detected : prev))
-    }, 800)
+    }, 1000)
 
-    return () => {
-      if (unsubLocale) unsubLocale()
-      if (unsubCtx) unsubCtx()
-      clearInterval(timer)
-    }
-  }, [props.ctx])
+    return () => clearInterval(timer)
+  }, [])
 
   const changeLocale = (newLoc: Locale) => {
-    const ctxLocale = props.ctx?.locale ?? (props.ctx as any)?.get?.('locale')
-    if (ctxLocale?.setLocale) {
-      try { ctxLocale.setLocale(newLoc) } catch { /* empty */ }
-    }
     setLocale(newLoc)
   }
 
@@ -1146,20 +1116,20 @@ export function apply(ctx: ClientContext): void {
       name: 'settings.section',
       id: 'dsh-plugin-updater-section',
       order: 60,
-      label: () => (getDshLocale((ctx as any).locale ?? (ctx as any).get?.('locale')) === 'zh' ? '插件更新' : 'Plugin Updates'),
-    }, (props: any) => jsx(PluginUpdaterSection, { ...props, ctx })),
+      label: () => (getDshLocale() === 'zh' ? '插件更新' : 'Plugin Updates'),
+    }, PluginUpdaterSection),
   ), 'dsh-plugin-updater: settings section')
 
   // 3.2：站内通知铃铛（纯 DOM 独立挂载，参考 whale-girl 模式）
-  ctx.effect(() => mountBell(ctx), 'dsh-plugin-updater: notification bell')
+  ctx.effect(() => mountBell(), 'dsh-plugin-updater: notification bell')
 }
 
 /** 站内通知铃铛：智能按需浮现 + 清空 + 位置避让 + 点击跳转设置。 */
-function mountBell(ctx?: any): () => void {
+function mountBell(): () => void {
   const root = document.getElementById('dshpu-bell-root')
   if (root) return () => {} // 已挂载
 
-  const getT = () => translations[getDshLocale(ctx?.locale ?? ctx?.get?.('locale'))] || translations.en
+  const getT = () => translations[getDshLocale()] || translations.en
 
   const container = document.createElement('div')
   container.id = 'dshpu-bell-root'
