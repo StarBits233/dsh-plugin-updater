@@ -101,8 +101,12 @@ function runCmd(cmd: string, args: string[], cwd: string, timeoutMs = 120000): P
   return new Promise((resolvePromise) => {
     const isWin = process.platform === 'win32'
     const finalCmd = isWin && !cmd.includes('.') && (cmd === 'npm' || cmd === 'pnpm' || cmd === 'dsh') ? `${cmd}.cmd` : cmd
-    execFile(finalCmd, args, { cwd, timeout: timeoutMs, windowsHide: true, shell: isWin, maxBuffer: 16 * 1024 * 1024 }, (err, stdout, stderr) => {
-      resolvePromise({ code: err ? (err as any).code ?? 1 : 0, stdout: String(stdout), stderr: String(stderr) })
+    // 关键：对 node.exe / git.exe / process.execPath 等二进制可执行文件，绝对不能开 shell: true！
+    // 否则 Windows cmd.exe 在路径含空格（如 AppData\Local\DeepSeek Harness）时会截断报错。
+    // 只有 .cmd / .bat 文件才需要 shell: true。
+    const useShell = isWin && (finalCmd.toLowerCase().endsWith('.cmd') || finalCmd.toLowerCase().endsWith('.bat'))
+    execFile(finalCmd, args, { cwd, timeout: timeoutMs, windowsHide: true, shell: useShell, maxBuffer: 16 * 1024 * 1024 }, (err, stdout, stderr) => {
+      resolvePromise({ code: err ? (err as any).code ?? 1 : 0, stdout: String(stdout ?? ''), stderr: String(stderr ?? '') })
     })
   })
 }
