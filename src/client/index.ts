@@ -737,7 +737,9 @@ function PluginUpdaterSection(props: { close?: () => void; t?: (key: string, par
   return jsxs('div', {
     style: C.page,
     children: [
-      jsx('style', { children: '@keyframes dshpu-spin{to{transform:rotate(360deg)}} .dshpu-link:hover{text-decoration:underline !important;}' }),
+      jsx('style', {
+        children: '@keyframes dshpu-spin{to{transform:rotate(360deg)}} .dshpu-link:hover{text-decoration:underline !important;} @keyframes dshpu-toast-in{from{opacity:0;transform:translateY(-12px) scale(0.96)}to{opacity:1;transform:translateY(0) scale(1)}}',
+      }),
       jsx('h3', { style: C.h3, children: t('title') }),
       jsx('p', { style: C.stats, children: stats }),
       mainNode,
@@ -1020,17 +1022,40 @@ function PluginUpdaterSection(props: { close?: () => void; t?: (key: string, par
         style: C.note,
         children: t('footerNote'),
       }),
-      // 3.8: toast 容器
+      // 3.8: toast 容器（顶部水平居中悬浮，避让右上角关闭按钮与打开配置文件按钮）
       toasts.length
         ? jsx('div', {
-            style: { position: 'fixed', top: 16, right: 16, zIndex: 10000, display: 'flex', flexDirection: 'column', gap: 8, maxWidth: 320 },
+            style: {
+              position: 'fixed',
+              top: 24,
+              left: '50%',
+              transform: 'translateX(-50%)',
+              zIndex: 10000,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: 8,
+              maxWidth: 420,
+              pointerEvents: 'none',
+            },
             children: toasts.map((t) =>
               jsx('div', {
                 style: {
-                  padding: '10px 14px', borderRadius: 8, fontSize: 12, whiteSpace: 'pre-wrap',
-                  background: t.kind === 'ok' ? 'rgba(46,204,113,.95)' : 'rgba(220,50,50,.95)',
-                  color: '#fff', boxShadow: '0 4px 12px rgba(0,0,0,.3)',
+                  padding: '9px 20px',
+                  borderRadius: 20,
+                  fontSize: 13,
+                  fontWeight: 500,
+                  whiteSpace: 'pre-wrap',
+                  textAlign: 'center',
+                  background: t.kind === 'ok' ? 'rgba(30, 158, 84, 0.95)' : 'rgba(220, 50, 50, 0.95)',
+                  color: '#fff',
+                  boxShadow: '0 6px 20px rgba(0,0,0,0.25)',
+                  backdropFilter: 'blur(8px)',
+                  pointerEvents: 'auto',
+                  cursor: 'pointer',
+                  animation: 'dshpu-toast-in 0.22s ease-out',
                 },
+                onClick: () => setToasts((prev) => prev.filter((item) => item.id !== t.id)),
                 children: t.text,
               }, 'toast-' + t.id),
             ),
