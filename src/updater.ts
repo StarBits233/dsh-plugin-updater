@@ -7,14 +7,15 @@
  * - npm：备份 = 记录当前安装版本；回滚 = `dsh plugin add name@旧版本`。
  * - git：备份 = 记录当前 HEAD commit；回滚 = `git reset --hard 旧commit`。
  */
-import { existsSync, readFileSync, mkdirSync, mkdtempSync, writeFileSync, readdirSync, statSync, copyFileSync, rmSync, createWriteStream, renameSync, symlinkSync, lstatSync } from 'node:fs'
+import { existsSync, readFileSync, mkdirSync, mkdtempSync, writeFileSync, readdirSync, statSync, copyFileSync, rmSync, createWriteStream, renameSync, symlinkSync, lstatSync, realpathSync } from 'node:fs'
 import { join, dirname, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { pipeline } from 'node:stream/promises'
 import { installedVersion } from './registry.js'
+import { inspectAndHealHoist } from './hoist.js'
 
 /**
- * 修复 profile 中的 link: 插件 Windows Junction 软链（防止 pnpm 升级后覆盖或破坏软链）。
+ * 修复 profile 中的 link: 插件 Windows Junction 软链（防止 pnpm 升级后覆盖、破坏或生成畸形相对路径）。
  */
 export function healLinkJunctions(profileDirPath: string): string[] {
   const healed: string[] = []
@@ -43,6 +44,16 @@ export function healLinkJunctions(profileDirPath: string): string[] {
         const lst = lstatSync(dest)
         if (!lst.isSymbolicLink() && !lst.isDirectory()) {
           needRecreate = true
+        } else {
+          // Windows 针对畸形 target 进行真实路径匹配验证
+          try {
+            const real = realpathSync(dest)
+            if (resolve(real) !== resolve(target)) {
+              needRecreate = true
+            }
+          } catch {
+            needRecreate = true
+          }
         }
       }
     } catch {
@@ -53,7 +64,11 @@ export function healLinkJunctions(profileDirPath: string): string[] {
       try {
         rmSync(dest, { recursive: true, force: true })
         mkdirSync(dirname(dest), { recursive: true })
-        symlinkSync(target, dest, 'junction')
+        if (process.platform === 'win32') {
+          symlinkSync(target, dest, 'junction')
+        } else {
+          symlinkSync(target, dest, 'dir')
+        }
         healed.push(name)
       } catch {
         // best-effort

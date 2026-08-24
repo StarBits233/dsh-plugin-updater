@@ -1,7 +1,7 @@
 /**
  * @dsh-external/dsh-plugin-updater — 共享数据契约。
  *
- * 供 host 各模块（registry / git / service / updater）与 client 引用。
+ * 供 host 各模块（registry / git / service / updater / hoist / preset / process）与 client 引用。
  * 保持 /status、/update 的对外形状向后兼容（只增量、不破坏）。
  */
 
@@ -37,6 +37,19 @@ export interface LinkItem {
   ghTag?: string | null
 }
 
+/** Agent 预设条目（/status.presets[]）。 */
+export interface PresetItem {
+  name: string
+  dir: string
+  version?: string | null
+  description?: string
+  repo?: string | null
+  latestVersion?: string | null
+  outdated: boolean
+  ignored?: boolean
+  localSuiteAvailable?: boolean
+}
+
 /** 过时 npm 条目（旧 /status.outdated[]，保留兼容）。 */
 export interface OutdatedItem {
   name: string
@@ -52,6 +65,8 @@ export interface UpdateResult {
   npm: NpmItem[]
   outdated: OutdatedItem[]
   linked: LinkItem[]
+  presets?: PresetItem[]
+  processInfo?: ProcessDiagnostic
   errors: string[]
 }
 
@@ -99,6 +114,39 @@ export interface UpdateHistoryEntry {
   from?: string | null
   to?: string | null
   ok: boolean
-  kind: 'npm' | 'git' | 'main'
+  kind: 'npm' | 'git' | 'main' | 'preset'
   output?: string
+}
+
+/** Hoist 提升规则检查结果。 */
+export interface HoistCheckResult {
+  healthy: boolean
+  patterns: string[]
+  subPlugins: string[]
+  missingPatterns: string[]
+  addedPatterns: string[]
+  unresolvable: string[]
+}
+
+/** 进程与端口诊断信息。 */
+export interface ProcessDiagnostic {
+  port: number
+  inUse: boolean
+  pid: number | null
+  name: string | null
+  commandLine: string | null
+  parentPid: number | null
+  parentName: string | null
+  isOrphan: boolean
+  isDesktop: boolean
+}
+
+/** /doctor 体检完整结果。 */
+export interface DoctorResult {
+  healthy: boolean
+  scanned: number
+  healedJunctions: string[]
+  missingDeps: string[]
+  hoist: HoistCheckResult
+  process: ProcessDiagnostic
 }

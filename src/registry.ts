@@ -69,6 +69,42 @@ export async function fetchLatest(registry: string, name: string, timeoutMs: num
   }
 }
 
+export interface DistTagsResult {
+  latest?: string
+  next?: string
+  [tag: string]: string | undefined
+}
+
+/** 请求 npm dist-tags（如 latest, next 标签）。 */
+export async function fetchDistTags(registry: string, name: string, timeoutMs: number): Promise<DistTagsResult | null> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const pkgPath = name.split('/').map((s) => encodeURIComponent(s).replace(/%40/i, '@')).join('/')
+    // 优先请求 /-/package/<pkg>/dist-tags
+    const res = await fetch(`${registry}/-/package/${pkgPath}/dist-tags`, {
+      signal: controller.signal,
+      headers: { accept: 'application/json' },
+    })
+    if (res.ok) {
+      const data = (await res.json()) as DistTagsResult
+      if (data && typeof data === 'object') return data
+    }
+    // 降级：请求 /<pkg> 获取 packument 的 dist-tags
+    const res2 = await fetch(`${registry}/${pkgPath}`, {
+      signal: controller.signal,
+      headers: { accept: 'application/vnd.npm.install-v1+json, application/json' },
+    })
+    if (!res2.ok) return null
+    const data2 = (await res2.json()) as { 'dist-tags'?: DistTagsResult }
+    return data2?.['dist-tags'] ?? null
+  } catch {
+    return null
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 /** 读取 node_modules 中实际安装的版本（pnpm 直接依赖在根 node_modules 均有入口）。 */
 export function installedVersion(dir: string, name: string): string | null {
   try {

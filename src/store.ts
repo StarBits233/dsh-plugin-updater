@@ -39,7 +39,7 @@ interface HistoryRecord {
   from?: string | null
   to?: string | null
   ok: boolean
-  kind: 'npm' | 'git' | 'main'
+  kind: 'npm' | 'git' | 'main' | 'preset'
   output?: string
 }
 

@@ -98,3 +98,24 @@ test('git: findGitRoot 向上查找 + resolveLinkTarget', () => {
   assert.equal(gitMod.resolveLinkTarget(dir, 'link:not-exist-dir'), null)
   rmSync(dir, { recursive: true, force: true })
 })
+
+test('fetchDistTags: mock dist-tags 端点及 packument 降级', async () => {
+  const origFetch = globalThis.fetch
+  globalThis.fetch = async (url) => {
+    const u = String(url)
+    if (u.endsWith('/dist-tags')) {
+      return { ok: true, json: async () => ({ latest: '0.1.0-rc.7', next: '0.1.0-rc.8' }) }
+    }
+    return { ok: false }
+  }
+
+  try {
+    const tags = await registry.fetchDistTags('https://registry.test', '@deepseek-ai/dsh', 2000)
+    assert.ok(tags)
+    assert.equal(tags.latest, '0.1.0-rc.7')
+    assert.equal(tags.next, '0.1.0-rc.8')
+  } finally {
+    globalThis.fetch = origFetch
+  }
+})
+

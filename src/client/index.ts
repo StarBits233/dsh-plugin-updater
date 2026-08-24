@@ -114,9 +114,35 @@ interface LinkItem {
   ghTag?: string | null
 }
 
+interface PresetItem {
+  name: string
+  dir: string
+  version?: string | null
+  description?: string
+  repo?: string | null
+  latestVersion?: string | null
+  outdated: boolean
+  ignored?: boolean
+  localSuiteAvailable?: boolean
+}
+
+interface ProcessDiagnostic {
+  port: number
+  inUse: boolean
+  pid: number | null
+  name: string | null
+  commandLine: string | null
+  parentPid: number | null
+  parentName: string | null
+  isOrphan: boolean
+  isDesktop: boolean
+}
+
 interface UpdaterState {
   npm: NpmItem[]
   linked: LinkItem[]
+  presets?: PresetItem[]
+  processInfo?: ProcessDiagnostic
   errors: string[]
   checkedAt?: string
   cached?: boolean
@@ -176,6 +202,8 @@ function PluginUpdaterSection(props: { close?: () => void; t?: (key: string, par
         setState({
           npm: d.value?.npm ?? [],
           linked: d.value?.linked ?? [],
+          presets: d.value?.presets ?? [],
+          processInfo: d.value?.processInfo,
           errors: d.value?.errors ?? [],
           checkedAt: d.value?.checkedAt,
           cached: !!d.value?.cached,
@@ -312,12 +340,14 @@ function PluginUpdaterSection(props: { close?: () => void; t?: (key: string, par
 
   const outdatedNpm = state.npm.filter((n) => n.outdated && !n.ignored && !ignoredNames.has(n.name))
   const linkUpdatableCount = state.linked.filter((l) => !l.ignored && !ignoredNames.has(l.name) && (l.gitBehind || (!!l.ghLatest && !l.homepage))).length
-  const totalIgnoredCount = state.npm.filter((n) => n.ignored || ignoredNames.has(n.name)).length + state.linked.filter((l) => l.ignored || ignoredNames.has(l.name)).length
+  const outdatedPresets = (state.presets ?? []).filter((p) => p.outdated && !p.ignored && !ignoredNames.has('preset:' + p.name))
+  const totalIgnoredCount = state.npm.filter((n) => n.ignored || ignoredNames.has(n.name)).length + state.linked.filter((l) => l.ignored || ignoredNames.has(l.name)).length + (state.presets ?? []).filter((p) => p.ignored || ignoredNames.has('preset:' + p.name)).length
   const updatingOne = (name: string) => updating.includes(name)
 
   const allUpdatableList = [
     ...outdatedNpm.map((n) => ({ name: n.name, latest: n.latest! })),
     ...state.linked.filter((l) => !l.ignored && !ignoredNames.has(l.name) && (l.gitBehind || (!!l.ghLatest && !l.homepage))).map((l) => ({ name: l.name, latest: l.ghLatest || '' })),
+    ...outdatedPresets.map((p) => ({ name: 'preset:' + p.name, latest: p.latestVersion || '' })),
   ]
 
   const [selectedPkgs, setSelectedPkgs] = useState<Set<string>>(new Set())
@@ -327,6 +357,27 @@ function PluginUpdaterSection(props: { close?: () => void; t?: (key: string, par
   const [cfgToken, setCfgToken] = useState('')
   const [doctorResult, setDoctorResult] = useState<any>(null)
   const [doctorRunning, setDoctorRunning] = useState(false)
+
+  const killOrphan = (pid: number) => {
+    if (!window.confirm(`确定终止孤儿后端进程 PID ${pid} 吗？`)) return
+    setBusy(true)
+    fetch(API + '/kill-orphan', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ pid }),
+    })
+      .then((r) => r.json())
+      .then((d: any) => {
+        if (d?.ok) {
+          showToast(t('orphanKilled'), 'ok')
+          runDoctor()
+        } else {
+          showToast(t('orphanKillFailed') + (d?.output || ''), 'err')
+        }
+      })
+      .catch((e: any) => showToast('Error: ' + e, 'err'))
+      .finally(() => setBusy(false))
+  }
 
   const toggleSelect = (name: string) => {
     setSelectedPkgs((prev) => {
@@ -380,7 +431,7 @@ function PluginUpdaterSection(props: { close?: () => void; t?: (key: string, par
   }
 
   const [searchQuery, setSearchQuery] = useState('')
-  const [tab, setTab] = useState<'all' | 'outdated' | 'npm' | 'link' | 'ignored'>('all')
+  const [tab, setTab] = useState<'all' | 'outdated' | 'npm' | 'link' | 'presets' | 'ignored'>('all')
   const [activeChangelog, setActiveChangelog] = useState<{ name: string; loading: boolean; data?: any; error?: string } | null>(null)
 
   const toggleChangelog = (name: string, version: string) => {
@@ -443,7 +494,7 @@ function PluginUpdaterSection(props: { close?: () => void; t?: (key: string, par
     const isIgn = n.ignored || ignoredNames.has(n.name)
     if (tab === 'ignored') return isIgn && matchQuery(n)
     if (isIgn && tab === 'outdated') return false
-    if (tab === 'link') return false
+    if (tab === 'link' || tab === 'presets') return false
     if (tab === 'outdated' && !n.outdated) return false
     return matchQuery(n)
   })
@@ -452,10 +503,19 @@ function PluginUpdaterSection(props: { close?: () => void; t?: (key: string, par
     const isIgn = l.ignored || ignoredNames.has(l.name)
     if (tab === 'ignored') return isIgn && matchQuery(l)
     if (isIgn && tab === 'outdated') return false
-    if (tab === 'npm') return false
+    if (tab === 'npm' || tab === 'presets') return false
     const isUpdatable = l.gitBehind || (!!l.ghLatest && !l.homepage)
     if (tab === 'outdated' && !isUpdatable) return false
     return matchQuery(l)
+  })
+
+  const filteredPresets = (state.presets ?? []).filter((p) => {
+    const isIgn = p.ignored || ignoredNames.has('preset:' + p.name)
+    if (tab === 'ignored') return isIgn && matchQuery(p)
+    if (isIgn && tab === 'outdated') return false
+    if (tab === 'npm' || tab === 'link') return false
+    if (tab === 'outdated' && !p.outdated) return false
+    return matchQuery(p)
   })
 
   // npm 插件列表（卡片）
@@ -689,50 +749,232 @@ function PluginUpdaterSection(props: { close?: () => void; t?: (key: string, par
     }, 'link-' + l.name)
   })
 
-  const stats = `${new Date(state.checkedAt ?? Date.now()).toLocaleString()}${state.cached ? ' (cached)' : ''} · ${state.npm.length} ${t('npmSection')} (${outdatedNpm.length} ${t('updatable')}) · ${state.linked.length} ${t('linkSection')} (${linkUpdatableCount} ${t('updatable')})`
+  // Agent Presets 列表（卡片）
+  const presetItems: any[] = filteredPresets.map((p) => {
+    const isUpdating = updatingOne('preset:' + p.name)
+    const isIgn = p.ignored || ignoredNames.has('preset:' + p.name)
+    const nameNode = jsx('div', {
+      style: C.nameWrapper,
+      children: jsx('span', { style: C.name, children: p.name }),
+    })
+    let statusNode: any
+    let buttonNode: any = null
+    let ignoreNode: any = null
 
-  // 主程序状态条（3.6）
+    const verSpan = p.version ? jsx('span', { style: C.ver, children: 'v' + p.version }, 'ver-' + p.name) : null
+
+    if (isIgn) {
+      statusNode = jsxs('span', { style: { display: 'flex', alignItems: 'center', gap: 6 }, children: [verSpan, jsx('span', { style: { ...C.st, ...C.stLink }, children: t('ignored') })].filter(Boolean) })
+      ignoreNode = jsx('button', {
+        style: { ...C.btnGhost, padding: '3px 8px', fontSize: 11, cursor: 'pointer', borderRadius: 6 },
+        title: t('unignoreTitle'),
+        onClick: (e: any) => {
+          e.stopPropagation()
+          toggleIgnore('preset:' + p.name)
+        },
+        children: t('unignore'),
+      }, 'unign-preset-' + p.name)
+    } else if (p.outdated) {
+      statusNode = jsxs('span', {
+        style: { display: 'flex', alignItems: 'center', gap: 6 },
+        children: [
+          verSpan,
+          jsx('span', { style: C.arrow, children: '→' }),
+          jsx('span', { style: { ...C.ver, color: '#d98b0f' }, children: p.latestVersion ? 'v' + p.latestVersion : t('updatable') }),
+        ].filter(Boolean),
+      })
+      buttonNode = jsx('button', {
+        style: { ...C.updateBtn, ...(isUpdating || busy ? C.btnDisabled : {}) },
+        disabled: isUpdating || busy,
+        onClick: (e: any) => {
+          e.stopPropagation()
+          runUpdate([{ name: 'preset:' + p.name, latest: p.latestVersion || '' }], `${t('updatePreset')} ${p.name}`)
+        },
+        children: isUpdating ? jsx('span', { style: C.spinner }) : (p.localSuiteAvailable ? t('localSuiteSync') : t('updatePreset')),
+      }, 'preset-btn-' + p.name)
+      ignoreNode = jsx('button', {
+        style: { background: 'transparent', border: 'none', color: 'var(--dsw-alias-label-tertiary, #888)', fontSize: 11, cursor: 'pointer', padding: '2px 4px', whiteSpace: 'nowrap' },
+        title: t('ignore'),
+        onClick: (e: any) => {
+          e.stopPropagation()
+          if (window.confirm(`${t('ignore')} ${p.name}?`)) {
+            toggleIgnore('preset:' + p.name)
+          }
+        },
+        children: t('ignore'),
+      }, 'ignore-preset-' + p.name)
+    } else {
+      statusNode = jsxs('span', { style: { display: 'flex', alignItems: 'center', gap: 6 }, children: [verSpan, jsx('span', { style: { ...C.st, ...C.stOk }, children: t('isLatest') })].filter(Boolean) })
+    }
+
+    const checkboxNode = p.outdated
+      ? jsx('input', {
+          type: 'checkbox',
+          checked: selectedPkgs.has('preset:' + p.name),
+          onChange: (e: any) => {
+            e.stopPropagation()
+            toggleSelect('preset:' + p.name)
+          },
+          style: { marginRight: 8, cursor: 'pointer', accentColor: 'var(--dsw-alias-state-business-primary, #2563eb)' },
+        })
+      : null
+
+    const header = jsxs('div', {
+      style: C.itemHeader,
+      children: [checkboxNode, nameNode, statusNode, buttonNode, ignoreNode].filter(Boolean),
+    })
+    const desc = p.description ? jsx('div', { style: C.desc, title: p.description, children: p.description }) : null
+    return jsxs('li', {
+      style: { ...C.item, ...(isUpdating ? C.itemUpdating : {}) },
+      children: [header, desc].filter(Boolean),
+    }, 'preset-' + p.name)
+  })
+
+  const stats = `${new Date(state.checkedAt ?? Date.now()).toLocaleString()}${state.cached ? ' (cached)' : ''} · ${state.npm.length} ${t('npmSection')} (${outdatedNpm.length} ${t('updatable')}) · ${state.linked.length} ${t('linkSection')} (${linkUpdatableCount} ${t('updatable')}) · ${(state.presets ?? []).length} ${t('presetSection')} (${outdatedPresets.length} ${t('updatable')})`
+
+  // 主程序状态条（3.6 + 预发布通道）
   const mainNode = (() => {
     if (!main) return null
-    const updateable = !!main.updateable
-    const outdated = !!main.outdated
-    const label = outdated
-      ? `${t('updateMainBtn')}: ${main.current} → ${main.latest}`
-      : `${t('isLatest')}: ${main.current ?? '?'}`
-    const style: any = {
-      display: 'flex', alignItems: 'center', gap: 8, margin: '8px 0', padding: '9px 12px',
-      border: `1px solid ${outdated ? 'var(--dsw-alias-state-business-primary, #2563eb)' : 'var(--dsw-alias-border-l2, rgba(128,128,128,0.2))'}`,
-      borderRadius: 8, background: 'var(--dsw-alias-bg-module-platform, var(--dsw-alias-bg-layer-2, rgba(128,128,128,0.06)))', fontSize: 13,
+    const current = main.current
+    const latest = main.latest
+    const prerelease = main.prerelease
+    const hasStableUpdate = !!main.hasStableUpdate
+    const hasPrereleaseUpdate = !!main.hasPrereleaseUpdate
+
+    const triggerUpdate = (targetVer: string, isPre: boolean) => {
+      const confirmText = isPre
+        ? (t('updatePrereleaseConfirm') || '确定更新至预发布版本 {version} 吗？').replace('{version}', targetVer)
+        : (t('updateMainConfirmSpecific') || '确定更新至 {version} 吗？').replace('{version}', targetVer)
+      if (!window.confirm(confirmText)) return
+      setBusy(true)
+      setMsg(`${t('watchdogUpdating')} (@deepseek-ai/dsh@${targetVer})`)
+      fetch(API + '/update-main', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ confirm: true, target: targetVer }),
+      })
+        .then((r) => r.json())
+        .then((d: any) => {
+          const out = d?.value?.output ?? JSON.stringify(d ?? {})
+          setMsg(out)
+          const isOk = !!(d?.ok && d?.value?.ok)
+          setMsgErr(!isOk)
+          showToast(isOk ? t('watchdogUpdating') : (d?.value?.output || 'Update failed'), isOk ? 'ok' : 'err')
+          if (isOk) {
+            // 启动自动重连探测循环（等待看门狗更新并重启服务）
+            let attempts = 0
+            const maxAttempts = 30 // 最多轮询 ~60 秒
+            const interval = setInterval(() => {
+              attempts++
+              fetch(API + '/state?t=' + Date.now())
+                .then((res) => {
+                  if (res.ok) {
+                    clearInterval(interval)
+                    setBusy(false)
+                    setMsg('')
+                    showToast('🎉 DSH 服务已成功升级并重启！', 'ok')
+                    refresh(true)
+                  }
+                })
+                .catch(() => {
+                  if (attempts >= maxAttempts) {
+                    clearInterval(interval)
+                    setBusy(false)
+                    setMsg('后台升级已完成，若服务未自动重连，请点击托盘重启或重新打开 DSH。')
+                  }
+                })
+            }, 2000)
+          } else {
+            setBusy(false)
+          }
+        })
+        .catch((err: any) => {
+          setMsg('Error: ' + err)
+          setMsgErr(true)
+          showToast('Error: ' + err, 'err')
+          setBusy(false)
+        })
     }
-    const btn = outdated && updateable
-      ? jsx('button', {
-          style: { ...C.updateBtn },
+
+    let bannerContent: any
+    let buttonNode: any = null
+
+    if (hasStableUpdate) {
+      bannerContent = jsxs('span', {
+        style: { color: 'var(--dsw-alias-state-business-primary, #2563eb)', display: 'flex', alignItems: 'center', gap: 6 },
+        children: [
+          jsx('span', { style: { fontWeight: 600 }, children: `DSH ${t('updateMainBtn')}:` }),
+          jsx('span', { style: C.ver, children: current ?? '?' }),
+          jsx('span', { style: C.arrow, children: '→' }),
+          jsx('span', { style: { ...C.ver, color: '#d98b0f' }, children: latest }),
+        ],
+      })
+      const buttons: any[] = [
+        jsx('button', {
+          style: { ...C.updateBtn, ...(busy ? C.btnDisabled : {}) },
+          disabled: busy,
           onClick: (e: any) => {
             e.stopPropagation()
-            if (!window.confirm(t('updateMainConfirm'))) return
-            fetch(API + '/update-main', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirm: true }) })
-              .then((r) => r.json())
-              .then((d: any) => {
-                setMsg(d?.value?.output ?? JSON.stringify(d ?? {}))
-                setMsgErr(!(d?.ok ?? d?.value?.ok))
-                setTimeout(() => refresh(true), 1500)
-              })
-              .catch((err: any) => { setMsg('Error: ' + err); setMsgErr(true) })
+            if (latest) triggerUpdate(latest, false)
           },
           children: t('updateMainBtn'),
-        }, 'mainbtn')
-      : null
+        }, 'main-stable-btn'),
+      ]
+      if (hasPrereleaseUpdate && prerelease) {
+        buttons.push(
+          jsx('button', {
+            style: { ...C.btnGhost, padding: '4px 10px', fontSize: 12, cursor: 'pointer', borderRadius: 6, ...(busy ? C.btnDisabled : {}) },
+            disabled: busy,
+            onClick: (e: any) => {
+              e.stopPropagation()
+              triggerUpdate(prerelease, true)
+            },
+            children: `${t('updatePrereleaseBtn')} (${prerelease})`,
+          }, 'main-pre-btn')
+        )
+      }
+      buttonNode = jsxs('div', { style: { display: 'flex', gap: 6 }, children: buttons })
+    } else if (hasPrereleaseUpdate && prerelease) {
+      bannerContent = jsxs('div', {
+        style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
+        children: [
+          jsx('span', { style: { color: 'var(--dsw-alias-label-secondary, #888)' }, children: `${t('isLatest')}: ${current ?? '?'}` }),
+          jsx('span', { style: { ...C.st, ...C.stOut }, children: `${t('prereleaseTag')}: ${prerelease}` }),
+        ],
+      })
+      buttonNode = jsx('button', {
+        style: { ...C.updateBtn, background: '#d98b0f', ...(busy ? C.btnDisabled : {}) },
+        disabled: busy,
+        onClick: (e: any) => {
+          e.stopPropagation()
+          triggerUpdate(prerelease, true)
+        },
+        children: `${t('updatePrereleaseBtn')} (${prerelease})`,
+      }, 'main-pre-btn')
+    } else {
+      bannerContent = jsx('span', {
+        style: { color: 'var(--dsw-alias-label-secondary, #888)' },
+        children: `${t('isLatest')}: ${current ?? '?'}`,
+      })
+    }
+
+    const style: any = {
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, margin: '8px 0', padding: '9px 12px',
+      border: `1px solid ${hasStableUpdate ? 'var(--dsw-alias-state-business-primary, #2563eb)' : hasPrereleaseUpdate ? 'rgba(240,180,60,0.45)' : 'var(--dsw-alias-border-l2, rgba(128,128,128,0.2))'}`,
+      borderRadius: 8, background: 'var(--dsw-alias-bg-module-platform, var(--dsw-alias-bg-layer-2, rgba(128,128,128,0.06)))', fontSize: 13,
+    }
+
     return jsxs('div', {
       style,
       children: [
-        jsx('span', { style: { color: outdated ? 'var(--dsw-alias-state-business-primary, #2563eb)' : 'var(--dsw-alias-label-secondary, #888)' }, children: label }),
-        btn,
-      ],
+        bannerContent,
+        buttonNode,
+      ].filter(Boolean),
     }, 'main-status')
   })()
 
-  const hasItems = state.npm.length > 0 || state.linked.length > 0
-  const hasFilteredItems = filteredNpm.length > 0 || filteredLinked.length > 0
+  const hasItems = state.npm.length > 0 || state.linked.length > 0 || (state.presets?.length ?? 0) > 0
+  const hasFilteredItems = filteredNpm.length > 0 || filteredLinked.length > 0 || filteredPresets.length > 0
 
   return jsxs('div', {
     style: C.page,
@@ -852,9 +1094,9 @@ function PluginUpdaterSection(props: { close?: () => void; t?: (key: string, par
             ],
           }),
           jsxs('div', {
-            style: { display: 'flex', alignItems: 'center', gap: 10 },
+            style: { display: 'flex', alignItems: 'center', gap: 8 },
             children: [
-              jsx('label', {
+              jsxs('label', {
                 style: { display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', color: 'var(--dsw-alias-label-primary, #ddd)' },
                 children: [
                   jsx('input', { type: 'checkbox', checked: cfgNotify, onChange: (e: any) => setCfgNotify(e.target.checked) }),
@@ -904,7 +1146,20 @@ function PluginUpdaterSection(props: { close?: () => void; t?: (key: string, par
             ],
           }),
           doctorResult.healedJunctions?.length ? jsx('p', { style: { margin: '6px 0 0', color: 'var(--dsw-alias-label-primary, #ddd)' }, children: `🔧 ${doctorResult.healedJunctions.length} junctions healed: ${doctorResult.healedJunctions.join(', ')}` }) : null,
+          doctorResult.hoist?.addedPatterns?.length ? jsx('p', { style: { margin: '6px 0 0', color: '#1e9e54' }, children: `🛡️ ${t('hoistDoctorHealed')}: ${doctorResult.hoist.addedPatterns.join(', ')}` }) : null,
+          doctorResult.hoist?.unresolvable?.length ? jsx('p', { style: { margin: '6px 0 0', color: '#e74c3c' }, children: `⚠️ ${t('hoistDoctorMissing')}: ${doctorResult.hoist.unresolvable.join(', ')}` }) : null,
           doctorResult.missingDeps?.length ? jsx('p', { style: { margin: '6px 0 0', color: '#e74c3c' }, children: `⚠️ Missing modules: ${doctorResult.missingDeps.join(', ')}` }) : null,
+          doctorResult.process?.isOrphan ? jsxs('div', {
+            style: { margin: '8px 0 0', padding: '6px 10px', borderRadius: 6, background: 'rgba(231, 76, 60, 0.15)', border: '1px solid rgba(231,76,60,0.4)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
+            children: [
+              jsx('span', { style: { color: '#e74c3c', fontWeight: 600 }, children: `${t('orphanBackendWarn')} (PID: ${doctorResult.process.pid})` }),
+              jsx('button', {
+                style: { ...C.btn, padding: '3px 10px', fontSize: 11, background: '#e74c3c', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer' },
+                onClick: () => killOrphan(doctorResult.process.pid),
+                children: t('killOrphanBtn'),
+              }),
+            ],
+          }) : null,
         ].filter(Boolean),
       }) : null,
       hasItems ? jsxs('div', {
@@ -922,12 +1177,12 @@ function PluginUpdaterSection(props: { close?: () => void; t?: (key: string, par
               jsx('button', {
                 style: { ...C.tabBtn, ...(tab === 'all' ? C.tabBtnActive : {}) },
                 onClick: () => setTab('all'),
-                children: `${t('tabAll')} (${state.npm.length + state.linked.length})`,
+                children: `${t('tabAll')} (${state.npm.length + state.linked.length + (state.presets ?? []).length})`,
               }),
               jsx('button', {
                 style: { ...C.tabBtn, ...(tab === 'outdated' ? C.tabBtnActive : {}) },
                 onClick: () => setTab('outdated'),
-                children: `${t('tabOutdated')} (${outdatedNpm.length + linkUpdatableCount})`,
+                children: `${t('tabOutdated')} (${outdatedNpm.length + linkUpdatableCount + outdatedPresets.length})`,
               }),
               jsx('button', {
                 style: { ...C.tabBtn, ...(tab === 'npm' ? C.tabBtnActive : {}) },
@@ -939,6 +1194,13 @@ function PluginUpdaterSection(props: { close?: () => void; t?: (key: string, par
                 onClick: () => setTab('link'),
                 children: `${t('tabLink')} (${state.linked.length})`,
               }),
+              (state.presets?.length ?? 0) > 0
+                ? jsx('button', {
+                    style: { ...C.tabBtn, ...(tab === 'presets' ? C.tabBtnActive : {}) },
+                    onClick: () => setTab('presets'),
+                    children: `${t('tabPresets')} (${(state.presets ?? []).length})`,
+                  })
+                : null,
               totalIgnoredCount > 0
                 ? jsx('button', {
                     style: { ...C.tabBtn, ...(tab === 'ignored' ? C.tabBtnActive : {}) },
@@ -966,6 +1228,14 @@ function PluginUpdaterSection(props: { close?: () => void; t?: (key: string, par
             children: [
               jsx('div', { style: C.section, children: `${t('linkSection')} (${filteredLinked.length})` }),
               jsx('ul', { style: C.grid, children: linkItems }),
+            ],
+          })
+        : null,
+      filteredPresets.length
+        ? jsxs('div', {
+            children: [
+              jsx('div', { style: C.section, children: `${t('presetSection')} (${filteredPresets.length})` }),
+              jsx('ul', { style: C.grid, children: presetItems }),
             ],
           })
         : null,

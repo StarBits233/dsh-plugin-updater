@@ -15,16 +15,16 @@
  *   GET  /@dsh-external/dsh-plugin-updater/api/notifications     → 通知列表
  *   POST /@dsh-external/dsh-plugin-updater/api/notifications/read → 全部已读
  */
-import { execFile } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import type { Context } from 'cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 
 import {
-  readRegistryUrl, checkNpmUpdates, mapLimit, fetchLatest, readTargetDescription, readTargetVersion,
+  readRegistryUrl, checkNpmUpdates, mapLimit, fetchLatest, fetchDistTags, readTargetDescription, readTargetVersion,
 } from './registry.js'
 import {
   gitRemoteHomepage, gitBehindStatus, tryGitUpdate, resolveLinkTarget,
@@ -32,12 +32,15 @@ import {
 import {
   backupNpmState, backupGitState, runNpmUpdateWithRollback, runGitUpdateWithRollback, runGithubDownloadUpdate, healLinkJunctions,
 } from './updater.js'
+import { inspectAndHealHoist } from './hoist.js'
+import { checkPresetUpdates, updatePreset } from './preset.js'
+import { diagnoseDshProcess, killProcessTree } from './process.js'
 import { hotReloadPlugin } from './reload.js'
 import { githubLatest, parseGhRepo, fetchChangelog } from './github.js'
 import { isNewer } from './semver.js'
 import { Config as UpdaterConfigSchema, type Config as UpdaterConfigType } from './config.js'
 import { PluginStore } from './store.js'
-import type { NpmItem, LinkItem, OutdatedItem, UpdateResult, UpdateResultCached, UpdateResultValue } from './types.js'
+import type { NpmItem, LinkItem, OutdatedItem, PresetItem, ProcessDiagnostic, DoctorResult, UpdateResult, UpdateResultCached, UpdateResultValue } from './types.js'
 
 export const name = '@dsh-external/dsh-plugin-updater'
 export const inject = ['tools', 'webServer', 'timer'] as const
@@ -201,7 +204,13 @@ async function computeUpdates(profile: string, isIgnored?: (name: string) => boo
     .filter((n): n is NpmItem & { current: string; latest: string } => n.outdated && !n.ignored && !!n.current && !!n.latest)
     .map((n) => ({ name: n.name, current: n.current!, latest: n.latest! }))
 
-  return { checkedAt: new Date().toISOString(), profile, profileDir: dir, npm, outdated, linked, errors }
+  // 扫描 Agent Presets
+  const presets = await checkPresetUpdates(dshHome(), fetchTimeoutMs, githubToken, isIgnored)
+
+  // 探查进程与端口状态
+  const processInfo = await diagnoseDshProcess()
+
+  return { checkedAt: new Date().toISOString(), profile, profileDir: dir, npm, outdated, linked, presets, processInfo, errors }
 }
 
 /** 核心检查 + 通知判定（供 API 与定时器共用）。 */
@@ -243,8 +252,16 @@ async function scheduledCheck(ctx: Context, config: Config): Promise<void> {
   }
 }
 
-/** 主程序（@deepseek-ai/dsh）状态检测（3.6）：读运行实例版本 + npm latest。 */
-async function checkMainUpdate(config: Config): Promise<{ current: string | null; latest: string | null; outdated: boolean; updateable: boolean }> {
+/** 主程序（@deepseek-ai/dsh）状态检测（3.6 + 预发布通道）：读运行实例版本 + npm dist-tags (latest & next)。 */
+async function checkMainUpdate(config: Config): Promise<{
+  current: string | null
+  latest: string | null
+  prerelease: string | null
+  hasStableUpdate: boolean
+  hasPrereleaseUpdate: boolean
+  outdated: boolean
+  updateable: boolean
+}> {
   const mainPkgDir = join(dirname(resolveDshBin() ?? ''), '..', '..')
   let current: string | null = null
   try {
@@ -261,25 +278,112 @@ async function checkMainUpdate(config: Config): Promise<{ current: string | null
     } catch { /* ignore */ }
   }
   const registry = readRegistryUrl(profileDir(config.profile), dshHome())
-  const latest = await fetchLatest(registry, '@deepseek-ai/dsh', config.fetchTimeoutMs)
-  const outdated = !!current && !!latest && isNewer(latest, current)
-  return { current, latest, outdated, updateable: config.allowCoreUpdates }
+  const distTags = await fetchDistTags(registry, '@deepseek-ai/dsh', config.fetchTimeoutMs)
+  const latest = distTags?.latest ?? null
+  const next = distTags?.next ?? null
+
+  const hasStableUpdate = !!current && !!latest && isNewer(latest, current)
+  // 预发布更新判定：存在 next 标签且 next 比当前已装版本更新，且如果存在 latest，next 也比 latest 更新（或 latest 等于 current）
+  const hasPrereleaseUpdate = !!current && !!next && isNewer(next, current) && (!latest || isNewer(next, latest) || !hasStableUpdate)
+  const prerelease = hasPrereleaseUpdate ? next : null
+  const outdated = hasStableUpdate || hasPrereleaseUpdate
+
+  return {
+    current,
+    latest,
+    prerelease,
+    hasStableUpdate,
+    hasPrereleaseUpdate,
+    outdated,
+    updateable: true,
+  }
 }
 
-/** 主程序更新（3.6）：npm 全局/运行时更新。仅 allowCoreUpdates=true 时可用。不自动重启宿主。 */
-async function runMainUpdate(ctx: Context, config: Config): Promise<{ ok: boolean; output: string }> {
-  if (!config.allowCoreUpdates) {
-    return { ok: false, output: '已禁 用主程序更新（allowCoreUpdates=false）' }
+/** 主程序后台看门狗全自动升级（3.6 + Watchdog 机制）：生成脱离主进程生命周期的看门狗脚本并启动。 */
+async function runMainUpdate(ctx: Context, config: Config, target: string = 'latest'): Promise<{ ok: boolean; output: string; watchdog?: boolean }> {
+  const cleanTarget = target.trim() || 'latest'
+  const rtDir = join(process.env.LOCALAPPDATA ?? '', 'DeepSeek Harness', 'runtime')
+  const scriptPath = join(dshHome(), 'dsh-watchdog-update.ps1')
+  const logPath = join(dshHome(), 'dsh-watchdog-update.log')
+  const currentPid = process.pid
+
+  const scriptContent = `# DSH Watchdog Updater Script
+$ErrorActionPreference = 'Continue'
+$target = "${cleanTarget}"
+$rtDir = "${rtDir.replace(/\\/g, '\\\\')}"
+$currentPid = ${currentPid}
+$logFile = "${logPath.replace(/\\/g, '\\\\')}"
+
+function Log($msg) {
+  $line = "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] $msg"
+  Add-Content -Path $logFile -Value $line -Encoding UTF8
+}
+
+Log "=== Watchdog update started for @deepseek-ai/dsh@$target (Parent PID: $currentPid) ==="
+
+# 1. 等待以确保 HTTP 响应完整返回前端
+Start-Sleep -Milliseconds 1500
+
+# 2. 终止当前旧 node 进程释放文件占用锁
+try {
+  $proc = Get-Process -Id $currentPid -ErrorAction SilentlyContinue
+  if ($proc) {
+    Log "Terminating process $currentPid to release file locks..."
+    Stop-Process -Id $currentPid -Force -ErrorAction SilentlyContinue
   }
-  // 用 npm 更新 @deepseek-ai/dsh 到 latest（全局）。不自动重启，提示用户重启。
-  const r = await runCmd('npm', ['install', '-g', '@deepseek-ai/dsh@latest'], process.cwd(), 300000)
-  const output = (r.stdout + r.stderr).trim()
-  if (r.code === 0) {
-    st(ctx).addHistory({ name: '@deepseek-ai/dsh', from: null, to: 'latest', ok: true, kind: 'main', output: '已更新主程序，请重启 DSH 生效' })
-    return { ok: true, output: output.slice(-500) || '主程序已更新，请重启 DSH 生效' }
+} catch {
+  Log "Process termination notice: $_"
+}
+
+# 等待文件系统锁完全释放
+Start-Sleep -Seconds 2
+
+# 3. 若存在桌面版独立 Runtime，优先升级 Runtime 目录
+if (Test-Path (Join-Path $rtDir "package.json")) {
+  Log "Updating Desktop runtime in $rtDir ..."
+  Push-Location $rtDir
+  & npm install "@deepseek-ai/dsh@$target" --save 2>&1 | Out-File -Append -FilePath $logFile -Encoding UTF8
+  Pop-Location
+}
+
+# 4. 同步升级全局 npm
+Log "Updating global npm ..."
+& npm install -g "@deepseek-ai/dsh@$target" 2>&1 | Out-File -Append -FilePath $logFile -Encoding UTF8
+
+# 5. 检查是否需要重新拉起（如果是纯 CLI 环境没有桌面守护进程）
+$isDesktop = Get-Process -Name 'dsh-desktop' -ErrorAction SilentlyContinue
+if (-not $isDesktop) {
+  Log "Standalone CLI mode detected: relaunching dsh web..."
+  Start-Process powershell -ArgumentList '-NoProfile','-WindowStyle','Hidden','-Command',"dsh web --port 3080"
+} else {
+  Log "Desktop App mode detected: desktop supervisor will auto-restart DSH backend."
+}
+
+Log "=== Watchdog update script finished ==="
+`
+
+  try {
+    writeFileSync(scriptPath, scriptContent, 'utf8')
+    const child = spawn('powershell.exe', [
+      '-NoProfile',
+      '-ExecutionPolicy', 'Bypass',
+      '-WindowStyle', 'Hidden',
+      '-File', scriptPath,
+    ], {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+    })
+    child.unref()
+
+    const msg = `已启动后台看门狗升级程序（目标版本: ${cleanTarget}）。DSH 正在自动完成升级并重启，请稍候约 10-15 秒...`
+    st(ctx).addHistory({ name: '@deepseek-ai/dsh', from: null, to: cleanTarget, ok: true, kind: 'main', output: msg })
+    return { ok: true, output: msg, watchdog: true }
+  } catch (err: any) {
+    const errMsg = `看门狗升级程序启动失败: ${String(err?.message ?? err)}`
+    st(ctx).addHistory({ name: '@deepseek-ai/dsh', from: null, to: cleanTarget, ok: false, kind: 'main', output: errMsg })
+    return { ok: false, output: errMsg }
   }
-  st(ctx).addHistory({ name: '@deepseek-ai/dsh', from: null, to: null, ok: false, kind: 'main', output })
-  return { ok: false, output: output.slice(-500) || '主程序更新失败' }
 }
 
 /** 执行更新：npm 走 dsh plugin add（带回滚）；link 走 git（带回滚 + dirty 保护）。带 per-package 并发锁（3.7）。 */
@@ -304,20 +408,29 @@ async function runUpdate(ctx: Context, config: Config, packages: { name: string;
       RUNNING_UPDATES.delete(p.name)
     }
   }
-  // 更新完成后自动自愈检查 link 软链
+  // 更新完成后自动自愈检查 link 软链与 Hoist 提升规则
   try {
     healLinkJunctions(dir)
+    inspectAndHealHoist(dir, true)
   } catch {
     // best-effort
   }
   return { results }
 }
 
-/** 单包更新（含 npm/link/github，带回滚与热重启）。 */
+/** 单包更新（含 npm/link/github/preset，带回滚与热重启）。 */
 async function updateOne(
   ctx: Context, config: Config, dir: string, deps: Record<string, string>, store: PluginStore,
   p: { name: string; latest: string },
 ): Promise<{ ok: boolean; output: string }> {
+  // Preset 预设更新处理
+  if (p.name.startsWith('preset:')) {
+    const presetName = p.name.replace(/^preset:/, '')
+    const resPreset = await updatePreset(dshHome(), presetName, config.fetchTimeoutMs, config.githubToken || process.env.GITHUB_TOKEN || '')
+    store.addHistory({ name: p.name, from: null, to: resPreset.version ?? null, ok: resPreset.ok, kind: 'preset', output: resPreset.output })
+    return { ok: resPreset.ok, output: resPreset.output }
+  }
+
   const spec = deps[p.name] ?? ''
   if (isLinked(spec)) {
     const target = resolveLinkTarget(dir, spec)
@@ -419,7 +532,7 @@ export function apply(ctx: Context, config: Config): void {
         })
         return
       }
-      // POST /update-main（3.6，仅 allowCoreUpdates）
+      // POST /update-main（3.6 + 预发布通道，仅 allowCoreUpdates）
       if (req.method === 'POST' && pathname === '/update-main') {
         let body: any = {}
         try { body = JSON.parse(await readBody(req)) } catch { /* empty */ }
@@ -427,7 +540,8 @@ export function apply(ctx: Context, config: Config): void {
           writeJson(res, 400, { ok: false, error: '需要 { confirm: true }' })
           return
         }
-        const r = await runMainUpdate(ctx, config)
+        const target = typeof body?.target === 'string' && body.target.trim().length > 0 ? body.target.trim() : 'latest'
+        const r = await runMainUpdate(ctx, config, target)
         writeJson(res, 200, { ok: r.ok, value: r })
         return
       }
@@ -495,13 +609,15 @@ export function apply(ctx: Context, config: Config): void {
       if (req.method === 'POST' && pathname === '/doctor') {
         const dir = profileDir(config.profile)
         const healed = healLinkJunctions(dir)
+        const hoist = inspectAndHealHoist(dir, true)
+        const proc = await diagnoseDshProcess()
         const deps = readDependencies(config.profile)
         const missingDeps: string[] = []
         for (const depName of Object.keys(deps)) {
           const modPath = join(dir, 'node_modules', ...depName.split('/'))
           if (!existsSync(modPath)) missingDeps.push(depName)
         }
-        const healthy = healed.length === 0 && missingDeps.length === 0
+        const healthy = healed.length === 0 && missingDeps.length === 0 && hoist.healthy && !proc.isOrphan
         writeJson(res, 200, {
           ok: true,
           value: {
@@ -509,8 +625,31 @@ export function apply(ctx: Context, config: Config): void {
             scanned: Object.keys(deps).length,
             healedJunctions: healed,
             missingDeps,
+            hoist,
+            process: proc,
           },
         })
+        return
+      }
+      // POST /kill-orphan
+      if (req.method === 'POST' && pathname === '/kill-orphan') {
+        let body: any = {}
+        try { body = JSON.parse(await readBody(req)) } catch { /* empty */ }
+        const pid = typeof body?.pid === 'number' ? body.pid : 0
+        if (!pid) { writeJson(res, 400, { ok: false, error: '需要 pid' }); return }
+        const resKill = await killProcessTree(pid)
+        writeJson(res, 200, { ok: resKill.ok, output: resKill.output })
+        return
+      }
+      // POST /update-preset
+      if (req.method === 'POST' && pathname === '/update-preset') {
+        let body: any = {}
+        try { body = JSON.parse(await readBody(req)) } catch { /* empty */ }
+        const name = typeof body?.name === 'string' ? body.name.trim() : ''
+        if (!name) { writeJson(res, 400, { ok: false, error: '需要 preset name' }); return }
+        const resPreset = await updatePreset(dshHome(), name, config.fetchTimeoutMs, config.githubToken || process.env.GITHUB_TOKEN || '')
+        store.addHistory({ name: `preset:${name}`, from: null, to: resPreset.version ?? null, ok: resPreset.ok, kind: 'preset', output: resPreset.output })
+        writeJson(res, 200, { ok: resPreset.ok, value: resPreset })
         return
       }
       // POST /config
